@@ -5,7 +5,7 @@ A small native macOS GUI for [spotDL](https://github.com/spotDL/spotify-download
 Instead of opening Terminal and typing:
 
 ```bash
-cd ~/Desktop/songs
+cd ~/your-folder
 spotdl "Always"
 ```
 
@@ -14,7 +14,7 @@ you can simply open the app, enter a song name or Spotify URL, and click **Downl
 Downloads are saved to:
 
 ```text
-~/Desktop/songs
+~/your-folder
 ```
 
 ---
@@ -92,7 +92,7 @@ If `spotdl` is already installed, you can skip this step.
 Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/spotdl-downloader.git
+git clone https://github.com/monysp/spotdl-gui.git
 cd spotdl-downloader
 ```
 
@@ -210,7 +210,7 @@ spotdl "<your input>"
 with the working directory set to:
 
 ```text
-~/Desktop/songs
+~/your-folder
 ```
 
 ---
