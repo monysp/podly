@@ -1,229 +1,128 @@
-# 🎵 SpotDL Downloader
+# SpotDL GUI
 
-A small native macOS GUI for [spotDL](https://github.com/spotDL/spotify-downloader).
+A small, minimal macOS app that puts a native SwiftUI interface on top of [spotDL](https://github.com/spotDL/spotify-downloader). Type a song name or paste a Spotify link, press Return, and watch it download in a Now Playing–style card with cover art, title, artist and progress.
 
-Instead of opening Terminal and typing:
+> Not affiliated with Spotify or the spotDL project.
 
-```bash
-cd ~/your-folder
-spotdl "Always"
-```
+## Features
 
-you can simply open the app, enter a song name or Spotify URL, and click **Download**.
+- **One field for everything** – search by song name / artist, or paste a Spotify track, album or playlist link.
+- **Now Playing card** – album art (with a soft blurred glow), title, artist — album, a progress bar, the current stage (*Finding song info → Searching → Downloading → Converting*), and `n of N` for albums and playlists.
+- **Clear status, minimal UI** – one quiet line under the card says what happened and what you can do next (*Show in Finder*, *Try again*, *View log*).
+- **Honest error handling** – detects `LookupError: No results found` even when spotDL exits with code 0, and tells you when song info couldn't be found.
+- **Welcome screen** – shows your 3 most recent downloads (click to reveal in Finder) and a *Paste Spotify link* shortcut when your clipboard contains one.
+- **No scrolling** – the Home screen is a single fixed layout.
+- **Settings** – Light / Dark / System appearance and a custom download folder.
+- **Log viewer** – full spotDL output, with a copy button.
 
-Downloads are saved to:
+## Requirements
 
-```text
-~/your-folder
-```
+| | |
+|---|---|
+| macOS | 13 Ventura or later |
+| Xcode / Swift | Xcode 15+ (Swift 5.9+) recommended |
+| [spotDL](https://github.com/spotDL/spotify-downloader) | installed and runnable from the command line |
+| [FFmpeg](https://ffmpeg.org) | required by spotDL for audio conversion |
 
----
-
-## ✨ Features
-
-- 🎵 Native SwiftUI macOS interface
-- 🔗 Supports Spotify URLs
-- 🔎 Supports song-name searches
-- 📁 Downloads directly to `~/Desktop/songs`
-- 📜 Shows spotDL output inside the app
-- 📂 Open the output folder with one click
-- 🖥️ No Terminal required after building the app
-- 🍎 Designed for Apple Silicon Macs
-
----
-
-## 📸 How it works
-
-```text
-┌─────────────────────────────────────┐
-│ 🎵 SpotDL Downloader               │
-│                                     │
-│ Spotify URL / Song name             │
-│ ┌─────────────────────────────────┐ │
-│ │ Always                          │ │
-│ └─────────────────────────────────┘ │
-│                                     │
-│        [ ↓ Download ]               │
-│                                     │
-│ 📁 ~/Desktop/songs                  │
-│                                     │
-│ ┌─────────────────────────────────┐ │
-│ │ Starting spotDL...              │ │
-│ │ Searching...                    │ │
-│ │ Downloading...                  │ │
-│ │ ✅ Finished!                    │ │
-│ └─────────────────────────────────┘ │
-└─────────────────────────────────────┘
-```
-
----
-
-## 🧰 Requirements
-
-- macOS 13 Ventura or newer
-- Xcode Command Line Tools
-- Python 3
-- spotDL
-
-Install Xcode Command Line Tools:
-
-```bash
-xcode-select --install
-```
-
-Install spotDL:
+Install the dependencies:
 
 ```bash
 python3 -m pip install spotdl
+brew install ffmpeg          # or: spotdl --download-ffmpeg
 ```
 
-Check that spotDL works:
+Check that it works before using the app:
 
 ```bash
 spotdl --version
 ```
 
-If `spotdl` is already installed, you can skip this step.
+The app looks for `spotdl` in these places, then falls back to `command -v spotdl` in a login shell:
 
----
-
-## 🚀 Build
-
-Clone the repository:
-
-```bash
-git clone https://github.com/monysp/spotdl-gui.git
-cd spotdl-downloader
 ```
-
-Make the build script executable:
-
-```bash
-chmod +x build.command
-```
-
-Build the app:
-
-```bash
-./build.command
-```
-
-The script creates:
-
-```text
-build/
-└── SpotDL Downloader.app
-```
-
-The app will also open automatically after a successful build.
-
-You can then drag:
-
-```text
-SpotDL Downloader.app
-```
-
-to your Applications folder.
-
----
-
-## 🎧 Usage
-
-Open **SpotDL Downloader.app**.
-
-Enter either:
-
-```text
-Always
-```
-
-or a Spotify URL:
-
-```text
-https://open.spotify.com/track/...
-```
-
-Then click:
-
-```text
-Download
-```
-
-The downloaded file will be placed in:
-
-```text
-~/Desktop/songs
-```
-
----
-
-## 📂 Project Structure
-
-```text
-spotdl-downloader/
-├── SpotDLDownloader.swift
-├── build.command
-├── README.md
-├── .gitignore
-└── LICENSE
-```
-
-### `SpotDLDownloader.swift`
-
-The complete SwiftUI application.
-
-### `build.command`
-
-Builds the Swift source into a native `.app` bundle using `swiftc`.
-
-### `README.md`
-
-Project documentation.
-
----
-
-## 🛠️ How it works
-
-The application launches the existing `spotdl` executable installed on your Mac.
-
-It searches common locations such as:
-
-```text
 /opt/homebrew/bin/spotdl
 /usr/local/bin/spotdl
 ~/.local/bin/spotdl
-~/Library/Python/.../bin/spotdl
+~/Library/Python/3.12|3.13|3.14/bin/spotdl
 ```
 
-If it cannot find spotDL in those locations, it falls back to:
+## Build & run
+
+The whole app is a single file, `main.swift`.
+
+**Command line**
 
 ```bash
-command -v spotdl
+swiftc -parse-as-library -o SpotDLDownloader main.swift
+./SpotDLDownloader
 ```
 
-The app then runs:
+(`-parse-as-library` is needed because the file uses `@main`.)
 
-```bash
-spotdl "<your input>"
-```
+**Xcode**
 
-with the working directory set to:
+1. Create a new **macOS → App** project (SwiftUI, Swift).
+2. Replace the generated app/content files with the contents of `main.swift`.
+3. In *Signing & Capabilities*, **remove App Sandbox**. The app launches the external `spotdl` process and reads/writes your download folder, which the sandbox blocks.
+4. Run.
 
-```text
-~/your-folder
-```
+> Make sure the folder contains only one copy of `main.swift`. Two copies of the same code (or pasting the file twice) causes `'DownloadStatus' is ambiguous` errors.
 
----
+## Usage
 
-## ⚠️ Notes
+1. Type a song / artist, or paste a Spotify link.
+2. Press **Return** (or click the arrow in the field).
+3. Watch the card. When it finishes, use **Show in Finder** or the folder icon in the top bar.
 
-This project is a GUI wrapper around spotDL. It does **not** bundle spotDL or any third-party music service.
+Files are saved to `~/Desktop/songs` by default. Change it with **Change** at the bottom of Home, or in **Settings → Downloads**.
 
-You are responsible for complying with the terms of the services you use and applicable copyright laws.
+## How it works
 
----
+1. **Look up** – runs `spotdl save <query> --save-file <tmp>.spotdl` to get title, artist, album and cover URL without downloading anything.
+2. **Download** – runs `spotdl download <tmp>.spotdl` in your download folder. If the lookup finds nothing, it falls back to `spotdl <query>` and tells you song info is missing.
+3. **Track progress** – spotDL doesn't print a percentage when its output is piped, so the bar is *estimated* for each track and advances for real when spotDL reports `Downloaded "…"` or `Skipping …`. A real `NN%` in the output is used if it ever appears.
+4. **Decide the result** – reads spotDL's own output as well as its exit code, so a `LookupError` with exit code 0 is reported as *not found* instead of *saved*.
 
-## 📜 License
+## Project structure
+
+`main.swift` is organised by `// MARK:` sections:
+
+| Section | Purpose |
+|---|---|
+| App / Navigation / Sidebar | `@main` app, sidebar (Home, Settings), appearance |
+| Download Status | `DownloadStatus` enum (titles, icons, tints) |
+| Track Info | `TrackInfo` parsed from spotDL's `.spotdl` JSON |
+| spotDL Service | finding the executable, fetching metadata |
+| Now Playing Card | artwork, progress bar, card layout |
+| Recent Files | model for the welcome screen list |
+| Home | search field, status line, download flow |
+| Log View | full log sheet |
+| Settings | appearance, download folder, about |
+
+Preferences are stored with `@AppStorage`: `appearance` and `customOutputFolderPath`.
+
+## Troubleshooting
+
+**"Could not find spotdl"** – install it (`python3 -m pip install spotdl`) and confirm `spotdl --version` works in Terminal. If it's installed somewhere unusual, make sure it's on the `PATH` of your login shell.
+
+**"No results found" / "No song info found"** – spotDL couldn't match the search on Spotify. Try `Artist - Title` in English, check the spelling, or paste the Spotify link for the track. Non-English titles are often matched more reliably by link.
+
+**Downloads fail or have no audio** – check that FFmpeg is installed (`ffmpeg -version`) and view the log with the terminal icon in the top bar.
+
+**"Already in …"** – the file already exists in the download folder, so spotDL skipped it.
+
+## Known limitations
+
+- There is no **Cancel** button yet.
+- Progress within a track is an estimate (see *How it works*).
+- Switching to Settings during a download resets the Home screen's progress display; the download itself continues.
+- Cover art and song info need an internet connection.
+
+## Legal
+
+spotDL finds matching audio on YouTube using Spotify metadata. Use this app only for content you have the right to download, and follow the terms of service and copyright laws that apply to you.
+
+## License
 
 MIT License
 
