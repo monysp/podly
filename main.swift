@@ -299,7 +299,6 @@ enum SpotDLService {
             return Metadata(tracks: [], fileURL: nil)
         }
 
-        // Drain the pipe first so a chatty process can't block on a full buffer.
         _ = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
@@ -597,7 +596,6 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Quiet top bar: icons only
             HStack(spacing: 16) {
                 Spacer()
 
@@ -622,7 +620,6 @@ struct HomeView: View {
 
             Spacer(minLength: 0)
 
-            // Everything lives in one fixed layout, so nothing needs scrolling.
             VStack(spacing: 24) {
                 if currentTrack == nil {
                     hero
@@ -644,7 +641,6 @@ struct HomeView: View {
 
             Spacer(minLength: 0)
 
-            // Footer: download location
             HStack(spacing: 6) {
                 Image(systemName: "folder")
 
@@ -672,7 +668,6 @@ struct HomeView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             createOutputFolderIfNeeded()
-
             loadRecent()
 
             withAnimation(.easeOut(duration: 0.45).delay(0.05)) {
@@ -734,7 +729,6 @@ struct HomeView: View {
         .animation(.easeInOut(duration: 0.15), value: isDownloading)
     }
 
-    /// Fixed-height area so the search field never jumps when things appear.
     private var nowPlayingSlot: some View {
         VStack(spacing: 10) {
             ZStack(alignment: .top) {
@@ -785,7 +779,6 @@ struct HomeView: View {
         log.contains("Could not find spotdl")
     }
 
-    /// Welcome header, shown until the first download starts.
     private var hero: some View {
         VStack(spacing: 12) {
             ZStack {
@@ -816,7 +809,6 @@ struct HomeView: View {
         }
     }
 
-    /// Below the field before a download: quick paste + recent downloads.
     private var emptyHint: some View {
         VStack(spacing: 16) {
             if query.isEmpty, let link = clipboardLink {
@@ -949,7 +941,6 @@ struct HomeView: View {
         }
     }
 
-    /// One quiet line: what happened, and what you can do about it.
     @ViewBuilder
     private var statusLine: some View {
         switch downloadStatus {
@@ -970,7 +961,7 @@ struct HomeView: View {
                     statusAction("Show in Finder") {
                         NSWorkspace.shared.open(outputFolder)
                     }
-                case .failed:
+                case .failed, .notFound:
                     if !spotdlMissing {
                         statusAction("Try again") { download() }
                     }
@@ -1053,9 +1044,6 @@ struct HomeView: View {
         }
     }
 
-    /// spotDL doesn't report a percentage when its output is piped, so the bar
-    /// eases toward ~93% for the current track and jumps forward when spotDL
-    /// prints that the track has finished.
     private func tick() {
         guard isDownloading, completedTracks < tracks.count else { return }
         let cap = metadataLoaded ? 0.93 : 0.08
@@ -1129,7 +1117,6 @@ struct HomeView: View {
                 return
             }
 
-            // Step 1: ask spotDL for title / artist / cover before downloading.
             let metadata = SpotDLService.fetchMetadata(
                 executable: executable,
                 query: input
@@ -1151,7 +1138,6 @@ struct HomeView: View {
 
                 metadataLoaded = true
 
-                // Step 2: download.
                 runDownload(
                     executable: executable,
                     saveFile: metadata.fileURL,
@@ -1188,7 +1174,6 @@ struct HomeView: View {
         do {
             try process.run()
 
-            // Keep the SwiftUI main thread responsive while spotDL runs.
             DispatchQueue.global(qos: .userInitiated).async {
                 process.waitUntilExit()
                 let status = process.terminationStatus
@@ -1228,10 +1213,6 @@ struct HomeView: View {
         }
 
         let output = log.lowercased()
-        let detectedStatus: DownloadStatus
-
-        // spotDL can print "LookupError: No results found for song: …"
-        // and still exit with code 0, so read its own output, not just the exit code.
         let raw = downloadOutput.lowercased()
         let downloaded = raw.components(separatedBy: "downloaded \"").count - 1
         let skipped = raw.components(separatedBy: "skipping").count - 1
@@ -1241,7 +1222,15 @@ struct HomeView: View {
         )
         missedCount = missed
 
-        if status == 0 && missed > 0 && downloaded == 0 && skipped == 0 {
+        // ตรวจจับ LookupError หรือ No results found ทั้งใน raw output และ log
+        let hasLookupError = raw.contains("lookuperror") ||
+                             raw.contains("no results found") ||
+                             output.contains("lookuperror") ||
+                             output.contains("no results found for song")
+
+        let detectedStatus: DownloadStatus
+
+        if (status == 0 && missed > 0 && downloaded == 0 && skipped == 0) || (hasLookupError && downloaded == 0 && skipped == 0) {
             detectedStatus = .notFound
             log += "\n\nSong not found. Try another title, artist, or Spotify URL."
         } else if status == 0 {
@@ -1256,7 +1245,8 @@ struct HomeView: View {
                 log += "\n\nFinished successfully."
                 downloadCount += max(downloaded, 1)
             }
-        } else if output.contains("no results") ||
+        } else if hasLookupError ||
+                  output.contains("no results") ||
                   output.contains("could not find") ||
                   output.contains("no song") ||
                   output.contains("song not found") ||
@@ -1282,8 +1272,26 @@ struct HomeView: View {
                 withinTrack = 0
             }
 
-            // Clear the input only after a real successful download.
             if detectedStatus == .success {
+                query = ""
+            }
+        }
+
+        // หน่วงเวลา 15 วินาทีแล้วกลับไปที่หน้าแรก (Hero View / Initial Search View)
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(15))
+
+            // ตรวจสอบว่าไม่มีการดาวน์โหลดใหม่เริ่มต้นขึ้นระหว่างรอ 15 วินาที
+            guard !isDownloading, downloadStatus != .ready else { return }
+
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                tracks = []
+                completedTracks = 0
+                withinTrack = 0
+                metadataLoaded = false
+                lookupFailed = false
+                missedCount = 0
+                downloadStatus = .ready
                 query = ""
             }
         }
@@ -1350,8 +1358,6 @@ struct LogView: View {
             HStack {
                 Text("Download Log")
                     .font(.system(size: 18, weight: .semibold))
-
-                Spacer()
 
                 Spacer()
 
