@@ -46,6 +46,29 @@ enum AppAppearance: String, CaseIterable {
     }
 }
 
+enum DownloadSource: String, CaseIterable {
+    case spotDL
+    case ytDlp
+
+    var title: String {
+        switch self {
+        case .spotDL: return "spotDL"
+        case .ytDlp: return "yt-dlp"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .spotDL: return "music.note"
+        case .ytDlp: return "play.rectangle"
+        }
+    }
+
+    var alternate: DownloadSource {
+        self == .spotDL ? .ytDlp : .spotDL
+    }
+}
+
 // MARK: - Navigation
 
 enum AppPage: Hashable {
@@ -107,10 +130,10 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selection) {
             Section {
-                Label("Home", systemImage: "music.note")
+                Label("Home", systemImage: "arrow.down.circle")
                     .tag(AppPage.home)
 
-                Label("Library", systemImage: "music.note.list")
+                Label("Library", systemImage: "books.vertical")
                     .tag(AppPage.library)
             }
 
@@ -806,6 +829,7 @@ struct HomeView: View {
     @State private var recentFiles: [RecentFile] = []
     @State private var lookupFailed = false
     @State private var missedCount = 0
+    @State private var activeDownloadSource: DownloadSource = .spotDL
 
     private let ticker = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
@@ -813,6 +837,13 @@ struct HomeView: View {
     private var customOutputPath: String =
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Desktop/songs").path
+
+    @AppStorage("primaryDownloadSource")
+    private var primaryDownloadSourceRawValue = DownloadSource.spotDL.rawValue
+
+    private var primaryDownloadSource: DownloadSource {
+        DownloadSource(rawValue: primaryDownloadSourceRawValue) ?? .spotDL
+    }
 
     private var outputFolder: URL {
         URL(fileURLWithPath: customOutputPath)
@@ -1306,6 +1337,7 @@ struct HomeView: View {
     private func download() {
         let input = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, !isDownloading else { return }
+        activeDownloadSource = primaryDownloadSource
 
         createOutputFolderIfNeeded()
 
@@ -1323,13 +1355,48 @@ struct HomeView: View {
         }
 
         log =
-            "Starting spotDL…\n" +
+            "Starting download with \(activeDownloadSource.title)…\n" +
             "Input: \(input)\n" +
             "Destination: \(outputFolder.path)\n\n"
+
+        if activeDownloadSource == .ytDlp {
+            runBackupDownload(
+                input: input,
+                metadataQuery: input,
+                fallbackToSpotDL: true
+            )
+        } else {
+            startSpotDL(input: input, fallbackToYtDlp: true)
+        }
+    }
+
+    private func startSpotDL(input: String, fallbackToYtDlp: Bool) {
+        downloadOutput = ""
+        completedTracks = 0
+        withinTrack = 0
+        metadataLoaded = false
+        lookupFailed = false
+
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            tracks = [TrackInfo.placeholder(for: input)]
+            isDownloading = true
+            downloadStatus = .downloading
+        }
+        log += "\nStarting spotDL…\n"
 
         DispatchQueue.global(qos: .userInitiated).async {
             guard let executable = SpotDLService.findExecutable() else {
                 DispatchQueue.main.async {
+                    if fallbackToYtDlp {
+                        log += "\nCould not find spotdl. Trying yt-dlp instead…\n"
+                        runBackupDownload(
+                            input: input,
+                            metadataQuery: input,
+                            fallbackToSpotDL: false
+                        )
+                        return
+                    }
+
                     log += """
 
                     Could not find spotdl.
@@ -1394,12 +1461,36 @@ struct HomeView: View {
         withinTrack = 0
         metadataLoaded = false
         lookupFailed = false
+        missedCount = 0
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
             tracks = [TrackInfo.placeholder(for: input)]
             isDownloading = true
             downloadStatus = .downloading
         }
-        log += "\nStarting backup download with yt-dlp…\n"
+        runBackupDownload(
+            input: input,
+            metadataQuery: metadataQuery,
+            fallbackToSpotDL: false
+        )
+    }
+
+    private func runBackupDownload(
+        input: String,
+        metadataQuery: String,
+        fallbackToSpotDL: Bool
+    ) {
+        downloadOutput = ""
+        completedTracks = 0
+        withinTrack = 0
+        metadataLoaded = false
+        lookupFailed = false
+        missedCount = 0
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            tracks = [TrackInfo.placeholder(for: input)]
+            isDownloading = true
+            downloadStatus = .downloading
+        }
+        log += "\nStarting yt-dlp…\n"
 
         Task {
             do {
@@ -1432,6 +1523,12 @@ struct HomeView: View {
                 }
             } catch {
                 log += "\nBackup download failed: \(error.localizedDescription)\n"
+                if fallbackToSpotDL {
+                    log += "Trying spotDL instead…\n"
+                    startSpotDL(input: input, fallbackToYtDlp: false)
+                    return
+                }
+
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isDownloading = false
                     downloadStatus = .failed
@@ -1557,6 +1654,24 @@ struct HomeView: View {
         }
 
         withAnimation(.easeInOut(duration: 0.3)) {
+                if activeDownloadSource == .spotDL,
+               detectedStatus == .notFound || detectedStatus == .failed {
+                let input = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                let metadataQuery: String
+                if let track = tracks.first, track.artist != "No song info found" {
+                    metadataQuery = "\(track.artist) \(track.title)"
+                } else {
+                    metadataQuery = input
+                }
+                log += "Trying yt-dlp as the backup source…\n"
+                runBackupDownload(
+                    input: input,
+                    metadataQuery: metadataQuery,
+                    fallbackToSpotDL: false
+                )
+                return
+            }
+
             downloadStatus = detectedStatus
             isDownloading = false
 
@@ -2125,11 +2240,15 @@ struct MusicFile: Identifiable, Equatable {
     var hasLyrics: Bool
     var duration: Int
     var bitrate: Int
+    var fileSizeBytes: Int64
     var editable: Bool
 
     var id: URL { url }
     var fileName: String { url.deletingPathExtension().lastPathComponent }
     var displayTitle: String { title.isEmpty ? fileName : title }
+    var formattedFileSize: String {
+        ByteCountFormatter.string(fromByteCount: fileSizeBytes, countStyle: .file)
+    }
 
     var subtitle: String {
         let parts = [artist, album].filter { !$0.isEmpty }
@@ -2168,6 +2287,7 @@ struct MusicFile: Identifiable, Equatable {
         hasLyrics = d["hasLyrics"] as? Bool ?? false
         duration = d["duration"] as? Int ?? 0
         bitrate = d["bitrate"] as? Int ?? 0
+        fileSizeBytes = Self.fileSize(of: url)
         editable = d["editable"] as? Bool ?? false
     }
 
@@ -2188,7 +2308,12 @@ struct MusicFile: Identifiable, Equatable {
         hasLyrics = false
         duration = 0
         bitrate = 0
+        fileSizeBytes = Self.fileSize(of: url)
         editable = false
+    }
+
+    private static func fileSize(of url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
     }
 }
 
@@ -2463,6 +2588,89 @@ enum CoverTool {
     }
 }
 
+enum MusicSyncService {
+    struct Result {
+        let added: Int
+        let alreadyPresent: Int
+        let failed: Int
+    }
+
+    enum SyncError: LocalizedError {
+        case unavailable(String)
+        case invalidResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailable(let message): return message
+            case .invalidResponse: return "Music returned an unexpected response."
+            }
+        }
+    }
+
+    static func addTracks(paths: [String]) throws -> Result {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script] + paths
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+        } catch {
+            throw SyncError.unavailable(error.localizedDescription)
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let output = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard process.terminationStatus == 0 else {
+            throw SyncError.unavailable(output.isEmpty ? "Could not contact Music." : output)
+        }
+
+        let counts = output.split(separator: "|").compactMap { Int($0) }
+        guard counts.count == 3 else { throw SyncError.invalidResponse }
+        return Result(added: counts[0], alreadyPresent: counts[1], failed: counts[2])
+    }
+
+    private static let script = #"""
+    on run argv
+        tell application "Music"
+            if not (exists user playlist "Podly Sync") then
+                make new user playlist with properties {name:"Podly Sync"}
+            end if
+            set syncPlaylist to user playlist "Podly Sync"
+            set existingPaths to {}
+            repeat with playlistTrack in (get tracks of syncPlaylist)
+                try
+                    set end of existingPaths to POSIX path of (get location of playlistTrack)
+                end try
+            end repeat
+            set addedCount to 0
+            set existingCount to 0
+            set failedCount to 0
+            repeat with songPath in argv
+                set pathText to contents of songPath
+                if pathText is in existingPaths then
+                    set existingCount to existingCount + 1
+                else
+                    try
+                        add (POSIX file pathText) to syncPlaylist
+                        set end of existingPaths to pathText
+                        set addedCount to addedCount + 1
+                    on error
+                        set failedCount to failedCount + 1
+                    end try
+                end if
+            end repeat
+        end tell
+        return (addedCount as text) & "|" & (existingCount as text) & "|" & (failedCount as text)
+    end run
+    """#
+}
+
 // MARK: - Library Model
 
 final class LibraryModel: ObservableObject {
@@ -2491,6 +2699,7 @@ final class LibraryModel: ObservableObject {
     @Published var toast: Toast?
     @Published var busy: Set<URL> = []
     @Published var batchStatus: String?
+    @Published var isSyncingToMusic = false
 
     private var cancelBatch = false
 
@@ -2512,6 +2721,36 @@ final class LibraryModel: ObservableObject {
             guard let self, self.toast?.id == item.id else { return }
             withAnimation(.easeOut(duration: 0.25)) {
                 self.toast = nil
+            }
+        }
+    }
+
+    func sendToMusic() {
+        guard !isSyncingToMusic, !files.isEmpty else { return }
+        isSyncingToMusic = true
+        let paths = files.map { $0.url.path }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try MusicSyncService.addTracks(paths: paths)
+                DispatchQueue.main.async {
+                    self.isSyncingToMusic = false
+                    if result.failed > 0 {
+                        self.showToast(
+                            "Added \(result.added) · \(result.alreadyPresent) already there · \(result.failed) failed",
+                            error: true
+                        )
+                    } else {
+                        self.showToast(
+                            "Podly Sync ready · added \(result.added), already there \(result.alreadyPresent) · finish in Finder"
+                        )
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isSyncingToMusic = false
+                    self.showToast(error.localizedDescription, error: true)
+                }
             }
         }
     }
@@ -2859,10 +3098,11 @@ final class AudioPlayerModel: ObservableObject {
     }
 
     func play(_ file: MusicFile, from files: [MusicFile]) {
+        let currentURL = currentTrack?.url
         queue = files
         guard let index = queue.firstIndex(where: { $0.url == file.url }) else { return }
 
-        if currentTrack?.url == file.url, player.currentItem != nil {
+        if currentURL == file.url, player.currentItem != nil {
             togglePlayback()
         } else {
             startTrack(at: index)
@@ -2882,6 +3122,18 @@ final class AudioPlayerModel: ObservableObject {
             player.play()
             isPlaying = true
         }
+    }
+
+    func stop() {
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        itemStatusObservation = nil
+        queue = []
+        currentIndex = nil
+        isPlaying = false
+        currentTime = 0
+        duration = 0
+        playbackError = nil
     }
 
     func previous() {
@@ -2990,6 +3242,13 @@ struct MiniPlayerView: View {
             }
             .frame(maxWidth: 300)
             .disabled(player.duration <= 0)
+
+            Button { player.stop() } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Stop and close player")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -3078,10 +3337,15 @@ struct LibraryRow: View {
                 badge("text.quote", isOn: file.hasLyrics, on: "Has lyrics", off: "No lyrics")
             }
 
-            Text(file.formatLabel)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.tertiary)
-                .frame(width: 72, alignment: .trailing)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(file.formattedFileSize)
+                    .font(.system(size: 11, weight: .medium))
+
+                Text(file.formatLabel)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 100, alignment: .trailing)
 
             Button(action: onEdit) {
                 Image(systemName: "pencil")
@@ -3136,6 +3400,11 @@ struct LibraryView: View {
         }
     }
 
+    private var totalStorageUsed: String {
+        let bytes = model.files.reduce(Int64(0)) { $0 + $1.fileSizeBytes }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -3182,6 +3451,10 @@ struct LibraryView: View {
                 Text("\(model.files.count)")
                     .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
+
+                Text("\(totalStorageUsed) used")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -3210,6 +3483,20 @@ struct LibraryView: View {
                 .disabled(model.toolsMissing || model.files.isEmpty)
                 .help("Fill in missing lyrics or covers for the whole library")
             }
+
+            Button {
+                model.sendToMusic()
+            } label: {
+                if model.isSyncingToMusic {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.down.to.line")
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Add all Library songs to the Podly Sync playlist in Music; finish syncing in Finder")
+            .disabled(model.isSyncingToMusic || model.files.isEmpty)
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
@@ -3887,6 +4174,9 @@ struct SettingsView: View {
     @AppStorage("appearance")
     private var appearanceRawValue = AppAppearance.system.rawValue
 
+    @AppStorage("primaryDownloadSource")
+    private var primaryDownloadSourceRawValue = DownloadSource.spotDL.rawValue
+
     @AppStorage("customOutputFolderPath")
     private var customOutputPath: String =
         FileManager.default.homeDirectoryForCurrentUser
@@ -3894,6 +4184,10 @@ struct SettingsView: View {
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: appearanceRawValue) ?? .system
+    }
+
+    private var primaryDownloadSource: DownloadSource {
+        DownloadSource(rawValue: primaryDownloadSourceRawValue) ?? .spotDL
     }
 
     var body: some View {
@@ -3910,6 +4204,27 @@ struct SettingsView: View {
                 Text("Appearance")
             } footer: {
                 Text("Choose how Podly should appear.")
+            }
+
+            Section {
+                Picker("Try first", selection: $primaryDownloadSourceRawValue) {
+                    ForEach(DownloadSource.allCases, id: \.rawValue) { source in
+                        Label(source.title, systemImage: source.icon)
+                            .tag(source.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                LabeledContent("Fallback") {
+                    Label(
+                        primaryDownloadSource.alternate.title,
+                        systemImage: primaryDownloadSource.alternate.icon
+                    )
+                }
+            } header: {
+                Text("Download Sources")
+            } footer: {
+                Text("The other source is tried automatically if the first one fails or finds no match.")
             }
 
             Section {
