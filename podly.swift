@@ -4,7 +4,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 @main
-struct SpotDLDownloaderApp: App {
+struct PodlyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -113,7 +113,7 @@ struct SidebarView: View {
                 Image(systemName: "waveform")
                     .foregroundStyle(.secondary)
 
-                Text("SpotDL")
+                Text("Podly")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
 
@@ -3381,7 +3381,7 @@ struct SettingsView: View {
             } header: {
                 Text("Appearance")
             } footer: {
-                Text("Choose how SpotDL should appear.")
+                Text("Choose how Podly should appear.")
             }
 
             Section {
@@ -3409,7 +3409,7 @@ struct SettingsView: View {
             }
 
             Section {
-                LabeledContent("App", value: "SpotDL Downloader")
+                LabeledContent("App", value: "Podly")
                 LabeledContent("Engine", value: "spotDL")
                 LabeledContent("Interface", value: "SwiftUI")
                 LabeledContent("Version", value: "1.0")
