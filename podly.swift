@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
 
@@ -57,6 +58,7 @@ enum AppPage: Hashable {
 
 struct ContentView: View {
     @State private var page: AppPage = .home
+    @StateObject private var audioPlayer = AudioPlayerModel()
 
     @AppStorage("appearance")
     private var appearanceRawValue = AppAppearance.system.rawValue
@@ -69,21 +71,31 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView(selection: $page)
         } detail: {
-            Group {
-                switch page {
-                case .home:
-                    HomeView()
-                case .library:
-                    LibraryView()
-                case .settings:
-                    SettingsView()
+            VStack(spacing: 0) {
+                Group {
+                    switch page {
+                    case .home:
+                        HomeView()
+                    case .library:
+                        LibraryView()
+                    case .settings:
+                        SettingsView()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+
+                if audioPlayer.currentTrack != nil {
+                    MiniPlayerView(player: audioPlayer)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .transition(.opacity.combined(with: .scale(scale: 0.98)))
         }
         .frame(minWidth: 820, minHeight: 560)
         .preferredColorScheme(appearance.colorScheme)
+        .environmentObject(audioPlayer)
         .animation(.easeInOut(duration: 0.2), value: page)
+        .animation(.easeInOut(duration: 0.2), value: audioPlayer.currentTrack != nil)
     }
 }
 
@@ -364,6 +376,215 @@ enum SpotDLService {
         } catch {}
 
         return nil
+    }
+}
+
+// MARK: - Backup Download Service
+
+enum BackupDownloadService {
+    struct TrackMetadata: Sendable {
+        let title: String
+        let artist: String
+        let album: String
+        let artworkURL: URL
+        let year: String
+        let trackNumber: String
+        let trackCount: String?
+        let genre: String?
+
+        var trackInfo: TrackInfo {
+            TrackInfo(title: title, artist: artist, album: album, coverURL: artworkURL)
+        }
+    }
+
+    enum BackupError: LocalizedError {
+        case missingTool(String)
+        case incompleteMetadata
+        case commandFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingTool(let name): return "Could not find \(name). Install it and try again."
+            case .incompleteMetadata: return "Could not find complete track metadata and cover art. No file was saved."
+            case .commandFailed(let output): return output.isEmpty ? "The backup download failed." : output
+            }
+        }
+    }
+
+    static func lookupMetadata(query: String) async throws -> TrackMetadata {
+        let searchTerm = try await iTunesSearchTerm(for: query)
+        let matches = await OnlineLookup.searchSongs(searchTerm)
+
+        guard let match = matches.first(where: {
+            !$0.album.isEmpty && !$0.year.isEmpty && !$0.track.isEmpty && $0.artworkURL != nil
+        }),
+        let artworkURL = match.artworkURL
+        else {
+            throw BackupError.incompleteMetadata
+        }
+
+        let trackParts = match.track.split(separator: "/", omittingEmptySubsequences: true)
+        guard let trackNumber = trackParts.first.map(String.init) else {
+            throw BackupError.incompleteMetadata
+        }
+        return TrackMetadata(
+            title: match.title,
+            artist: match.artist,
+            album: match.album,
+            artworkURL: artworkURL,
+            year: match.year,
+            trackNumber: trackNumber,
+            trackCount: trackParts.dropFirst().first.map(String.init),
+            genre: match.genre.isEmpty ? nil : match.genre
+        )
+    }
+
+    private static func iTunesSearchTerm(for query: String) async throws -> String {
+        guard query.lowercased().contains("spotify.com") else { return query }
+
+        var components = URLComponents(string: "https://open.spotify.com/oembed")!
+        components.queryItems = [URLQueryItem(name: "url", value: query)]
+        guard let url = components.url else { throw BackupError.incompleteMetadata }
+        let request = URLRequest(url: url, timeoutInterval: 15)
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let title = response["title"] as? String,
+              let artist = response["author_name"] as? String
+        else {
+            throw BackupError.incompleteMetadata
+        }
+        return "\(artist) \(title)"
+    }
+
+    static func download(
+        metadata: TrackMetadata,
+        destinationFolder: URL,
+        searchQuery: String
+    ) throws -> (URL, String) {
+        guard let ytDlp = findExecutable(named: "yt-dlp") else {
+            throw BackupError.missingTool("yt-dlp")
+        }
+        guard let ffmpeg = findExecutable(named: "ffmpeg") else {
+            throw BackupError.missingTool("FFmpeg")
+        }
+
+        let temporaryFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("podly-backup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryFolder,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryFolder) }
+
+        let artworkData = try Data(contentsOf: metadata.artworkURL)
+        guard !artworkData.isEmpty else { throw BackupError.incompleteMetadata }
+        let artworkFile = temporaryFolder.appendingPathComponent("cover.jpg")
+        try artworkData.write(to: artworkFile)
+
+        let audioTemplate = temporaryFolder.appendingPathComponent("audio.%(ext)s").path
+        let searchProcess = Process()
+        searchProcess.executableURL = URL(fileURLWithPath: ytDlp)
+        searchProcess.arguments = [
+            "--no-playlist",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--output", audioTemplate,
+            "ytsearch1:\(searchQuery)"
+        ]
+
+        let searchOutput = try run(searchProcess)
+        guard let audioFile = try FileManager.default.contentsOfDirectory(
+            at: temporaryFolder,
+            includingPropertiesForKeys: nil
+        ).first(where: { $0.pathExtension.lowercased() == "mp3" }) else {
+            throw BackupError.commandFailed(searchOutput)
+        }
+
+        let stem = "\(metadata.title) - \(metadata.artist)"
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let target = uniqueURL(
+            for: stem,
+            in: destinationFolder
+        )
+
+        let tagProcess = Process()
+        tagProcess.executableURL = URL(fileURLWithPath: ffmpeg)
+        var tagArguments = [
+            "-i", audioFile.path,
+            "-i", artworkFile.path,
+            "-map", "0:a:0",
+            "-map", "1:v:0",
+            "-c:a", "copy",
+            "-c:v", "mjpeg",
+            "-disposition:v:0", "attached_pic",
+            "-metadata:s:v", "title=Album cover",
+            "-metadata:s:v", "comment=Cover (front)",
+            "-metadata", "title=\(metadata.title)",
+            "-metadata", "artist=\(metadata.artist)",
+            "-metadata", "album=\(metadata.album)",
+            "-metadata", "album_artist=\(metadata.artist)",
+            "-metadata", "date=\(metadata.year)",
+            "-metadata", "track=\(metadata.trackNumber)\(metadata.trackCount.map { "/\($0)" } ?? "")",
+            "-id3v2_version", "3",
+            "-write_id3v1", "1"
+        ]
+        if let genre = metadata.genre {
+            tagArguments += ["-metadata", "genre=\(genre)"]
+        }
+        tagArguments += ["-y", target.path]
+        tagProcess.arguments = tagArguments
+
+        let tagOutput = try run(tagProcess)
+        return (target, searchOutput + tagOutput)
+    }
+
+    private static func run(_ process: Process) throws -> String {
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0 else {
+            throw BackupError.commandFailed(output)
+        }
+        return output
+    }
+
+    private static func findExecutable(named name: String) -> String? {
+        let candidates = [
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
+            "\(NSHomeDirectory())/.local/bin/\(name)"
+        ]
+        if let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return path
+        }
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", "command -v \(name)"]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return nil }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func uniqueURL(for stem: String, in folder: URL) -> URL {
+        var url = folder.appendingPathComponent(stem).appendingPathExtension("mp3")
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("\(stem) (\(suffix))").appendingPathExtension("mp3")
+            suffix += 1
+        }
+        return url
     }
 }
 
@@ -972,6 +1193,9 @@ struct HomeView: View {
                     if !spotdlMissing {
                         statusAction("Try again") { download() }
                     }
+                    if downloadStatus == .notFound {
+                        statusAction("Try backup") { backupDownload() }
+                    }
                     statusAction("View log") { showLogs = true }
                 default:
                     EmptyView()
@@ -1154,6 +1378,68 @@ struct HomeView: View {
         }
     }
 
+    private func backupDownload() {
+        let input = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty, !isDownloading else { return }
+
+        let metadataQuery: String
+        if let track = tracks.first, track.artist != "No song info found" {
+            metadataQuery = "\(track.artist) \(track.title)"
+        } else {
+            metadataQuery = input
+        }
+
+        downloadOutput = ""
+        completedTracks = 0
+        withinTrack = 0
+        metadataLoaded = false
+        lookupFailed = false
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            tracks = [TrackInfo.placeholder(for: input)]
+            isDownloading = true
+            downloadStatus = .downloading
+        }
+        log += "\nStarting backup download with yt-dlp…\n"
+
+        Task {
+            do {
+                let metadata = try await BackupDownloadService.lookupMetadata(query: metadataQuery)
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                    tracks = [metadata.trackInfo]
+                    metadataLoaded = true
+                }
+                log += "Found complete track metadata and cover art.\n"
+
+                let destinationFolder = outputFolder
+                let searchQuery = "\(metadata.artist) - \(metadata.title)"
+                let (savedURL, output) = try await Task.detached(priority: .userInitiated) {
+                    try BackupDownloadService.download(
+                        metadata: metadata,
+                        destinationFolder: destinationFolder,
+                        searchQuery: searchQuery
+                    )
+                }.value
+
+                log += output
+                log += "\nBackup download saved to: \(savedURL.path)\n"
+                downloadCount += 1
+                query = ""
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    completedTracks = tracks.count
+                    withinTrack = 0
+                    isDownloading = false
+                    downloadStatus = .success
+                }
+            } catch {
+                log += "\nBackup download failed: \(error.localizedDescription)\n"
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isDownloading = false
+                    downloadStatus = .failed
+                }
+            }
+        }
+    }
+
     private func runDownload(executable: String, saveFile: URL?, input: String) {
         let process = Process()
         let pipe = Pipe()
@@ -1289,7 +1575,10 @@ struct HomeView: View {
             try? await Task.sleep(for: .seconds(15))
 
             // ตรวจสอบว่าไม่มีการดาวน์โหลดใหม่เริ่มต้นขึ้นระหว่างรอ 15 วินาที
-            guard !isDownloading, downloadStatus != .ready else { return }
+            guard !isDownloading,
+                downloadStatus != .ready,
+                downloadStatus != .notFound
+            else { return }
 
             withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                 tracks = []
@@ -1627,13 +1916,14 @@ def read(path, cover_dir=None):
             name = hashlib.md5(key.encode("utf-8")).hexdigest()
             name += ".png" if mime_of(pic) == "image/png" else ".jpg"
             out = os.path.join(cover_dir, name)
-            with open(out, "wb") as fh:
-                fh.write(pic)
+            if not os.path.isfile(out):
+                with open(out, "wb") as fh:
+                    fh.write(pic)
             d["cover"] = out
     return d
 
 
-def scan(folder):
+def scan(folder, cover_dir=None):
     out = []
     if not os.path.isdir(folder):
         return out
@@ -1644,7 +1934,7 @@ def scan(folder):
         if not os.path.isfile(p) or os.path.splitext(name)[1].lower() not in AUDIO_EXTS:
             continue
         try:
-            d = read(p)
+            d = read(p, cover_dir)
         except ImportError:
             raise
         except Exception:
@@ -1798,7 +2088,7 @@ def main():
         if action == "ping":
             res = {"ok": True}
         elif action == "scan":
-            res = {"files": scan(req["folder"])}
+            res = {"files": scan(req["folder"], req.get("coverDir"))}
         elif action == "read":
             res = {"file": read(req["path"], req.get("coverDir"))}
         elif action == "write":
@@ -2232,7 +2522,11 @@ final class LibraryModel: ObservableObject {
         isLoading = true
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = TagService.run(["action": "scan", "folder": folder.path])
+            let result = TagService.run([
+                "action": "scan",
+                "folder": folder.path,
+                "coverDir": self.coverDir
+            ])
 
             var list: [MusicFile] = []
             var missing = false
@@ -2514,27 +2808,257 @@ final class LibraryModel: ObservableObject {
     }
 }
 
+@MainActor
+final class AudioPlayerModel: ObservableObject {
+    @Published private(set) var queue: [MusicFile] = []
+    @Published private(set) var currentIndex: Int?
+    @Published private(set) var isPlaying = false
+    @Published private(set) var currentTime = 0.0
+    @Published private(set) var duration = 0.0
+    @Published private(set) var playbackError: String?
+
+    private let player = AVPlayer()
+    private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
+    private var itemStatusObservation: NSKeyValueObservation?
+
+    var currentTrack: MusicFile? {
+        guard let currentIndex, queue.indices.contains(currentIndex) else { return nil }
+        return queue[currentIndex]
+    }
+
+    init() {
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if time.seconds.isFinite { currentTime = max(0, time.seconds) }
+                if let seconds = player.currentItem?.duration.seconds, seconds.isFinite {
+                    duration = max(0, seconds)
+                }
+            }
+        }
+
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let currentIndex, currentIndex + 1 < queue.count {
+                    startTrack(at: currentIndex + 1)
+                } else {
+                    isPlaying = false
+                    currentTime = duration
+                }
+            }
+        }
+    }
+
+    func play(_ file: MusicFile, from files: [MusicFile]) {
+        queue = files
+        guard let index = queue.firstIndex(where: { $0.url == file.url }) else { return }
+
+        if currentTrack?.url == file.url, player.currentItem != nil {
+            togglePlayback()
+        } else {
+            startTrack(at: index)
+        }
+    }
+
+    func togglePlayback() {
+        guard player.currentItem != nil else {
+            if let currentIndex { startTrack(at: currentIndex) }
+            return
+        }
+
+        if player.timeControlStatus == .playing {
+            player.pause()
+            isPlaying = false
+        } else {
+            player.play()
+            isPlaying = true
+        }
+    }
+
+    func previous() {
+        guard let currentIndex else { return }
+        if currentTime > 3 {
+            seek(to: 0)
+        } else if currentIndex > 0 {
+            startTrack(at: currentIndex - 1)
+        }
+    }
+
+    func next() {
+        guard let currentIndex, currentIndex + 1 < queue.count else { return }
+        startTrack(at: currentIndex + 1)
+    }
+
+    func seek(to seconds: Double) {
+        guard seconds.isFinite else { return }
+        player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600))
+        currentTime = max(0, seconds)
+    }
+
+    private func startTrack(at index: Int) {
+        guard queue.indices.contains(index) else { return }
+        currentIndex = index
+        currentTime = 0
+        duration = 0
+        playbackError = nil
+        let item = AVPlayerItem(url: queue[index].url)
+        itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            let message = item.error?.localizedDescription ?? "This audio format could not be played."
+            Task { @MainActor [weak self] in
+                self?.playbackError = message
+                self?.isPlaying = false
+            }
+        }
+        player.replaceCurrentItem(with: item)
+        player.play()
+        isPlaying = true
+    }
+}
+
+struct MiniPlayerView: View {
+    @ObservedObject var player: AudioPlayerModel
+
+    var body: some View {
+        HStack(spacing: 14) {
+            artwork
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(player.currentTrack?.displayTitle ?? "")
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Text(player.playbackError ?? player.currentTrack?.subtitle ?? "")
+                    .font(.system(size: 11))
+                    .foregroundStyle(player.playbackError == nil ? Color.secondary : Color.red)
+                    .lineLimit(1)
+            }
+            .frame(width: 180, alignment: .leading)
+
+            Spacer(minLength: 4)
+
+            HStack(spacing: 18) {
+                Button { player.previous() } label: {
+                    Image(systemName: "backward.end.fill")
+                }
+                .help("Previous track")
+                .disabled(player.queue.count < 2)
+
+                Button { player.togglePlayback() } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                        .background(Color.primary.opacity(0.08), in: Circle())
+                }
+                .help(player.isPlaying ? "Pause" : "Play")
+
+                Button { player.next() } label: {
+                    Image(systemName: "forward.end.fill")
+                }
+                .help("Next track")
+                .disabled(player.queue.count < 2)
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 4)
+
+            VStack(spacing: 1) {
+                Slider(
+                    value: Binding(
+                        get: { player.currentTime },
+                        set: { player.seek(to: $0) }
+                    ),
+                    in: 0...max(player.duration, 1)
+                )
+                HStack {
+                    Text(Self.time(player.currentTime))
+                    Spacer()
+                    Text(Self.time(player.duration))
+                }
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: 300)
+            .disabled(player.duration <= 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
+        if let track = player.currentTrack,
+           track.hasCover,
+           let image = NSImage(contentsOfFile: track.coverPath) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color.primary.opacity(0.07)
+                Image(systemName: "music.note")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private static func time(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "0:00" }
+        let value = max(0, Int(seconds))
+        return String(format: "%d:%02d", value / 60, value % 60)
+    }
+}
+
 // MARK: - Library View
 
 struct LibraryRow: View {
     let file: MusicFile
     let isBusy: Bool
+    let isCurrentTrack: Bool
+    let isPlaying: Bool
+    let onPlay: () -> Void
     let onEdit: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(0.07))
+            Button(action: onPlay) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(0.07))
 
-                if isBusy {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "music.note")
-                        .foregroundStyle(.secondary)
+                    if file.hasCover,
+                       let image = NSImage(contentsOfFile: file.coverPath) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Image(systemName: "music.note")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Image(systemName: isCurrentTrack && isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 25, height: 25)
+                        .background(.black.opacity(0.5), in: Circle())
                 }
+                .frame(width: 36, height: 36)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .frame(width: 36, height: 36)
+            .buttonStyle(.plain)
+            .help(isCurrentTrack && isPlaying ? "Pause" : "Play")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.displayTitle)
@@ -2585,6 +3109,7 @@ struct LibraryRow: View {
 
 struct LibraryView: View {
     @StateObject private var model = LibraryModel()
+    @EnvironmentObject private var player: AudioPlayerModel
 
     @AppStorage("customOutputFolderPath")
     private var customOutputPath: String =
@@ -2765,7 +3290,10 @@ struct LibraryView: View {
             List(filtered) { file in
                 LibraryRow(
                     file: file,
-                    isBusy: model.busy.contains(file.url)
+                    isBusy: model.busy.contains(file.url),
+                    isCurrentTrack: player.currentTrack?.url == file.url,
+                    isPlaying: player.isPlaying,
+                    onPlay: { player.play(file, from: filtered) }
                 ) {
                     editing = file
                 }
