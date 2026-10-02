@@ -2,7 +2,7 @@
 
 set -e
 
-APP_NAME="SpotDL Downloader"
+APP_NAME="Podly"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/build"
 APP="$BUILD/$APP_NAME.app"
@@ -17,20 +17,20 @@ mkdir -p \
 
 echo "⚙️ Compiling Swift..."
 
-swiftc "$ROOT/main.swift" \
-    -o "$APP/Contents/MacOS/SpotDLDownloader" \
+swiftc "$ROOT/podly.swift" \
+    -o "$APP/Contents/MacOS/Podly" \
     -framework SwiftUI \
     -framework AppKit \
     -parse-as-library \
     -target "$(uname -m)-apple-macos13.0"
 
 # Copy app icon
-if [[ -f "$ROOT/SpotDLDownloader.icns" ]]; then
+if [[ -f "$ROOT/Podly.icns" ]]; then
     echo "🎨 Installing app icon..."
-    cp "$ROOT/SpotDLDownloader.icns" \
-       "$APP/Contents/Resources/SpotDLDownloader.icns"
+    cp "$ROOT/Podly.icns" \
+       "$APP/Contents/Resources/Podly.icns"
 else
-    echo "⚠️ Warning: SpotDLDownloader.icns not found"
+    echo "⚠️ Warning: Podly.icns not found"
 fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -42,16 +42,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
 
     <key>CFBundleDisplayName</key>
-    <string>SpotDL Downloader</string>
+    <string>Podly</string>
 
     <key>CFBundleExecutable</key>
-    <string>SpotDLDownloader</string>
+    <string>Podly</string>
 
     <key>CFBundleIdentifier</key>
-    <string>com.local.spotdldownloader</string>
+    <string>com.local.podly</string>
 
     <key>CFBundleName</key>
-    <string>SpotDL Downloader</string>
+    <string>Podly</string>
 
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -63,7 +63,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>1.0</string>
 
     <key>CFBundleIconFile</key>
-    <string>SpotDLDownloader</string>
+    <string>Podly.icns</string>
 
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
@@ -75,7 +75,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-chmod +x "$APP/Contents/MacOS/SpotDLDownloader"
+chmod +x "$APP/Contents/MacOS/Podly"
 
 # Refresh Launch Services icon cache
 touch "$APP"
