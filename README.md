@@ -1,348 +1,101 @@
-# 🎵 Podly
+# Podly
 
-> A minimal, native macOS music downloader powered by spotDL.
+Podly is a native macOS music downloader and library manager built with SwiftUI. Search by song and artist or paste a Spotify link, download the match, then review and manage the audio files in your Library.
 
-Podly is a simple and modern macOS music downloader designed to make downloading music easier without using Terminal commands every time.
+> Podly is not affiliated with Spotify, spotDL, yt-dlp, or Apple Music.
 
-Built with **SwiftUI**, Podly provides an Apple-style interface for searching and downloading songs while automatically handling metadata, album artwork, lyrics, and your music library.
+## Features
 
----
+- Search by song and artist, or paste a Spotify track, album, or playlist link.
+- Choose spotDL or yt-dlp as the first download source. Podly automatically tries the other source if the first one fails or finds no match.
+- View artwork, track details, and download status while a download runs; open the log to inspect command output.
+- Choose a download folder and see recent downloads on Home.
+- Browse and search the Library, see each file's size and the total storage used, edit tags, find lyrics, fill in artwork, rename tracks, or move files to Trash.
+- Play Library tracks with the mini-player, seek and skip between tracks. Use the close button to stop playback and dismiss the player.
+- Send Library tracks to a `Podly Sync` playlist in Music, then sync that playlist to an iPod touch using Finder.
 
-## ✨ Features
+## Requirements
 
-* 🎵 **Search & Download Music**
+| Requirement | Notes |
+|---|---|
+| macOS 13 Ventura or later | Required to run the app. |
+| Xcode Command Line Tools | Provides `swiftc` for building. |
+| [spotDL](https://github.com/spotDL/spotify-downloader) | Required if selected as the first source or fallback. |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Required if selected as the first source or fallback. |
+| [FFmpeg](https://ffmpeg.org) | Used for audio conversion and embedding artwork/tags. |
+| Python 3 with `mutagen` | Used by Library features to read and edit audio tags. |
 
-  * Search for songs directly from the app.
-  * Powered by `spotDL`.
-
-* 🖥️ **Native macOS UI**
-
-  * Built with SwiftUI.
-  * Minimal Apple-inspired interface.
-  * Supports Light, Dark, and System appearance.
-
-* 📁 **Custom Output Folder**
-
-  * Choose where downloaded music should be stored.
-  * Default location:
-
-    ```text
-    ~/Desktop/songs
-    ```
-
-* 🏷️ **Automatic Metadata**
-
-  * Title
-  * Artist
-  * Album
-  * Album Artist
-  * Year
-  * Track Number
-  * Genre
-
-* 🖼️ **Album Artwork**
-
-  * Automatically retrieves and embeds cover artwork when available.
-
-* 📝 **Lyrics**
-
-  * Attempts to retrieve lyrics automatically.
-  * Supports plain and synchronized lyrics.
-
-* 📚 **Music Library**
-
-  * Browse recently downloaded music.
-  * View track metadata and artwork.
-
-* 🔎 **Clear Download Status**
-
-  * Downloading
-  * Download complete
-  * Song not found
-  * Already downloaded
-  * Download failed
-
-* 🧹 **Automatic Input Reset**
-
-  * Clears the search field after a completed download.
-
-* ⏱️ **Automatic Return**
-
-  * After a successful download, Podly waits briefly before returning to the initial state.
-
----
-
-## 🖥️ Requirements
-
-* macOS
-* Apple Silicon or Intel Mac
-* Xcode
-* Swift / SwiftUI
-* Python 3
-* `spotdl`
-* `mutagen` for metadata processing
-
----
-
-## 📦 Installation
-
-### 1. Install Homebrew
-
-If you don't already have Homebrew:
-
-[Homebrew](https://brew.sh/?utm_source=chatgpt.com)
-
-Then install the required dependencies.
-
-### 2. Install spotDL
+Install the command-line tools:
 
 ```bash
-python3 -m pip install spotdl
+python3 -m pip install spotdl mutagen
+brew install yt-dlp ffmpeg
 ```
 
-Verify:
+Confirm the tools are available in Terminal:
 
 ```bash
 spotdl --version
+yt-dlp --version
+ffmpeg -version
 ```
 
-### 3. Install Mutagen
+Podly checks common install locations and the login-shell `PATH` when looking for `spotdl`, `yt-dlp`, and `ffmpeg`.
+
+## Build and Run
+
+From the project directory, run:
 
 ```bash
-python3 -m pip install mutagen
+./build.command
 ```
 
-Verify:
+The script compiles `podly.swift`, creates `build/Podly.app`, and opens the app. The build requires `swiftc` and targets macOS 13 or later. The app launches external command-line tools, so build it without App Sandbox if using a separate Xcode project.
 
-```bash
-python3 -c "import mutagen; print(mutagen.version_string)"
-```
+## Getting Started
 
----
+1. Open **Settings** and choose a download folder.
+2. In **Download Sources**, choose which source to try first. The other source is used automatically as the fallback.
+3. On **Home**, enter a song and artist or paste a Spotify link, then press Return or select the download button.
+4. Follow the status below the download card. Use the folder button to open the destination and the log button to inspect output.
+5. Open **Library** to search, play, or manage downloaded tracks.
 
-## 🚀 Build Podly
+Downloads are saved to `~/Desktop/songs` by default. You can change this in Settings or from the folder control on Home.
 
-Clone the repository:
+## Library and iPod Sync
 
-```bash
-git clone https://github.com/YOUR_USERNAME/Podly.git
-cd Podly
-```
+The Library shows audio files in the selected download folder, including their file sizes and the total space they use. Select a track's edit control to change tags, artwork, or lyrics. The Library menu also includes batch options for filling in missing covers or lyrics.
 
-Open the project in Xcode:
+To sync music to an iPod touch:
 
-```bash
-open Podly.xcodeproj
-```
+1. Open **Library** and select **Send to Music**.
+2. Podly adds tracks that are not already in the `Podly Sync` playlist; it does not remove existing playlist items.
+3. Connect the iPod touch, open it in Finder, enable music syncing for selected playlists, select `Podly Sync`, and apply the changes.
 
-Select your Mac as the run destination and press:
+macOS may ask Podly for permission to control Music the first time.
 
-```text
-⌘ R
-```
+## Troubleshooting
 
----
+**A source cannot be found** – Install the selected tool and confirm its version command works in Terminal. If it is installed in a nonstandard location, make sure it is available on the login-shell `PATH`.
 
-## 🎧 Download Music
+**No matching song is found** – Check the spelling, try `Artist - Title`, or paste the Spotify track link. Search results can vary by track and region.
 
-1. Open **Podly**
-2. Enter a song name or supported URL
-3. Press **Download**
-4. Podly retrieves the song information
-5. The song is downloaded through `spotDL`
-6. Metadata and artwork are processed automatically
-7. The completed file is saved to your selected folder
+**A download fails or has no audio** – Confirm FFmpeg is installed and open the download log from Home. The log includes output from the source tools.
 
-Example:
+**Library tag editing is unavailable** – Install `mutagen` for the Python interpreter used by Podly, then refresh the Library.
 
-```text
-Always
-```
+**Music sync does not start** – Allow Podly to control Music in macOS privacy settings, then try **Send to Music** again.
 
-or a supported music URL.
+## Limitations
 
----
+- Downloads cannot currently be cancelled from the app.
+- Download progress within a track is estimated; completion advances when the source reports a finished track.
+- The backup source requires its own command-line tools and an internet connection. Metadata and artwork may not be available for every search.
 
-## 📁 Output
+## Legal
 
-By default, downloaded music is stored in:
+Use Podly only to download content you have the right to access and save. Follow the terms of service and copyright laws that apply to you.
 
-```text
-~/Desktop/songs
-```
+## License
 
-You can change this from the application's output folder selector.
-
-Example:
-
-```text
-songs/
-├── Artist A/
-│   └── Song A.mp3
-├── Artist B/
-│   └── Song B.mp3
-└── Artist C/
-    └── Song C.m4a
-```
-
-The exact folder structure depends on the `spotDL` configuration.
-
----
-
-## 🏷️ Metadata
-
-Podly includes a metadata processing system for downloaded files.
-
-Supported information includes:
-
-| Metadata      | Supported |
-| ------------- | :-------: |
-| Title         |     ✅     |
-| Artist        |     ✅     |
-| Album         |     ✅     |
-| Album Artist  |     ✅     |
-| Year          |     ✅     |
-| Track Number  |     ✅     |
-| Genre         |     ✅     |
-| Lyrics        |     ✅     |
-| Album Artwork |     ✅     |
-
-Supported audio formats include:
-
-```text
-MP3
-M4A
-FLAC
-OGG
-OPUS
-WAV
-```
-
----
-
-## 🎨 Interface
-
-Podly follows a minimal macOS design philosophy:
-
-* Native SwiftUI components
-* Sidebar navigation
-* System appearance support
-* Light / Dark mode
-* Subtle animations
-* Artwork previews
-* Clear download states
-* Minimal visual clutter
-
----
-
-## 🧩 Project Structure
-
-```text
-Podly/
-│
-├── Podly.swift
-├── README.md
-└── ...
-```
-
-The main application source is currently contained in:
-
-```text
-Podly.swift
-```
-
----
-
-## 🔧 How It Works
-
-Podly acts as a graphical frontend for `spotDL`.
-
-The general workflow is:
-
-```text
-User
-  │
-  ▼
-Podly
-  │
-  ├── Search / Metadata
-  │
-  ▼
-spotDL
-  │
-  ▼
-Downloaded Audio
-  │
-  ├── Metadata
-  ├── Artwork
-  └── Lyrics
-  │
-  ▼
-Selected Output Folder
-```
-
-Podly handles the graphical interface and file processing while `spotDL` performs the actual music downloading.
-
----
-
-## 🔐 Privacy
-
-Podly does not require an account or its own cloud backend.
-
-Search and download operations are handled through the services used by `spotDL` and the configured music sources.
-
-Do not use Podly to download or distribute copyrighted music without the necessary rights or permission.
-
----
-
-## ⚠️ Disclaimer
-
-Podly is an independent project and is **not affiliated with, endorsed by, or sponsored by Apple or Spotify**.
-
-`spotDL` is an external dependency and is subject to its own project license and terms.
-
-Users are responsible for complying with applicable copyright laws and the terms of the services they use.
-
----
-
-## 🛠️ Roadmap
-
-Planned improvements:
-
-* [ ] iPod synchronization
-* [ ] Automatic iPod detection
-* [ ] Playlist downloading
-* [ ] Download queue
-* [ ] Download history
-* [ ] Better library management
-* [ ] Drag & drop downloads
-* [ ] More audio format options
-* [ ] Improved metadata editor
-* [ ] Native macOS notifications
-* [ ] Better error diagnostics
-
----
-
-## 🤝 Contributing
-
-Contributions, ideas, and bug reports are welcome.
-
-If you find a bug or have an idea for a feature, open an issue or submit a pull request.
-
----
-
-## 📄 License
-
-MIT License
-
-Copyright (c) 2026
-
-See [LICENSE](LICENSE).
-
----
-
-## ⭐ Support
-
-If you find Podly useful, consider giving the repository a ⭐ on GitHub.
-
-Made with ❤️ and SwiftUI on macOS.
+MIT License. See [LICENSE](LICENSE).
