@@ -8,9 +8,11 @@ Podly is a native macOS music downloader and library manager built with SwiftUI.
 
 - Search by song and artist, or paste a Spotify track, album, or playlist link.
 - Choose spotDL or yt-dlp as the first download source. Podly automatically tries the other source if the first one fails or finds no match.
+- Queue multiple searches, reorder pending downloads, pause or resume the active download, cancel items, and retry failures.
 - View artwork, track details, and download status while a download runs; open the log to inspect command output.
 - Choose a download folder and see recent downloads on Home.
-- Browse and search the Library, see each file's size and the total storage used, edit tags, find lyrics, fill in artwork, rename tracks, or move files to Trash.
+- Choose from eight color themes and organize settings by appearance, download sources, download folder, and app information.
+- Browse and search the Library, sort by title or date added, find tracks with duplicate titles, see each file's size and the total storage used, edit tags, find lyrics, fill in artwork, rename tracks, or move files to Trash.
 - Play Library tracks with the mini-player, seek and skip between tracks. Use the close button to stop playback and dismiss the player.
 - Send Library tracks to a `Podly Sync` playlist in Music, then sync that playlist to an iPod touch using Finder.
 
@@ -56,9 +58,12 @@ The script compiles `podly.swift`, creates `build/Podly.app`, and opens the app.
 
 1. Open **Settings** and choose a download folder.
 2. In **Download Sources**, choose which source to try first. The other source is used automatically as the fallback.
-3. On **Home**, enter a song and artist or paste a Spotify link, then press Return or select the download button.
-4. Follow the status below the download card. Use the folder button to open the destination and the log button to inspect output.
-5. Open **Library** to search, play, or manage downloaded tracks.
+3. On **Home**, enter a song and artist or paste a Spotify link, then press Return or select the download button. Add more searches while a download is running to queue them.
+4. Open the queue button to reorder pending downloads, pause or resume the active download, cancel items, or retry a failed item.
+5. Follow the status below the download card. Use the folder button to open the destination and the log button to inspect output.
+6. Open **Library** to search, play, or manage downloaded tracks.
+
+The download queue opens from the queue button at the top of Home. Adding a song no longer opens the queue automatically.
 
 Downloads are saved to `~/Desktop/songs` by default. You can change this in Settings or from the folder control on Home.
 
@@ -88,7 +93,7 @@ macOS may ask Podly for permission to control Music the first time.
 
 ## Limitations
 
-- Downloads cannot currently be cancelled from the app.
+- Pausing and cancelling take effect when the current lookup or tool process reaches a safe checkpoint.
 - Download progress within a track is estimated; completion advances when the source reports a finished track.
 - The backup source requires its own command-line tools and an internet connection. Metadata and artwork may not be available for every search.
 
