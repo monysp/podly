@@ -14,18 +14,28 @@ struct PodlyApp: App {
     }
 }
 
-// MARK: - App Appearance
+// MARK: - App Theme
 
-enum AppAppearance: String, CaseIterable {
+enum AppTheme: String, CaseIterable {
     case system
     case light
     case dark
+    case midnight
+    case paper
+    case nord
+    case cupcake
+    case corporate
 
     var title: String {
         switch self {
-        case .system: return "System"
+        case .system: return "Auto"
         case .light: return "Light"
         case .dark: return "Dark"
+        case .midnight: return "Midnight"
+        case .paper: return "Paper"
+        case .nord: return "Nord"
+        case .cupcake: return "Cupcake"
+        case .corporate: return "Corporate"
         }
     }
 
@@ -34,15 +44,78 @@ enum AppAppearance: String, CaseIterable {
         case .system: return "circle.lefthalf.filled"
         case .light: return "sun.max"
         case .dark: return "moon"
+        case .midnight: return "moon.stars"
+        case .paper: return "doc.text"
+        case .nord: return "snowflake"
+        case .cupcake: return "birthday.cake"
+        case .corporate: return "building.2"
         }
     }
 
     var colorScheme: ColorScheme? {
         switch self {
         case .system: return nil
-        case .light: return .light
-        case .dark: return .dark
+        case .light, .paper, .nord, .cupcake, .corporate: return .light
+        case .dark, .midnight: return .dark
         }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .system, .light: return Color(red: 0.20, green: 0.48, blue: 0.92)
+        case .dark: return Color(red: 0.58, green: 0.48, blue: 0.98)
+        case .midnight: return Color(red: 0.00, green: 0.78, blue: 0.61)
+        case .paper: return Color(red: 0.38, green: 0.29, blue: 0.20)
+        case .nord: return Color(red: 0.35, green: 0.51, blue: 0.68)
+        case .cupcake: return Color(red: 0.24, green: 0.78, blue: 0.70)
+        case .corporate: return Color(red: 0.10, green: 0.45, blue: 0.72)
+        }
+    }
+
+    var canvas: Color {
+        switch self {
+        case .system: return Color(nsColor: .windowBackgroundColor)
+        case .light: return Color(red: 0.96, green: 0.96, blue: 0.97)
+        case .dark: return Color(red: 0.12, green: 0.12, blue: 0.14)
+        case .midnight: return Color(red: 0.04, green: 0.06, blue: 0.08)
+        case .paper: return Color(red: 0.97, green: 0.94, blue: 0.88)
+        case .nord: return Color(red: 0.89, green: 0.91, blue: 0.94)
+        case .cupcake: return Color(red: 0.96, green: 0.92, blue: 0.93)
+        case .corporate: return Color(red: 0.91, green: 0.93, blue: 0.95)
+        }
+    }
+
+    var previewSurface: Color {
+        switch self {
+        case .system: return Color(nsColor: .controlBackgroundColor)
+        case .light: return .white
+        case .dark: return Color(red: 0.18, green: 0.18, blue: 0.20)
+        case .midnight: return Color(red: 0.07, green: 0.09, blue: 0.12)
+        case .paper: return Color(red: 1.00, green: 0.98, blue: 0.93)
+        case .nord: return Color(red: 0.92, green: 0.94, blue: 0.97)
+        case .cupcake: return Color(red: 0.99, green: 0.96, blue: 0.96)
+        case .corporate: return Color(red: 0.96, green: 0.97, blue: 0.98)
+        }
+    }
+
+    var previewInk: Color {
+        switch self {
+        case .system: return .primary
+        case .dark, .midnight: return .white
+        case .light, .paper, .nord, .cupcake, .corporate:
+            return Color(red: 0.18, green: 0.20, blue: 0.23)
+        }
+    }
+}
+
+private struct PodlyThemeKey: EnvironmentKey {
+    static let defaultValue = AppTheme.system
+}
+
+private extension EnvironmentValues {
+    var podlyTheme: AppTheme {
+        get { self[PodlyThemeKey.self] }
+        set { self[PodlyThemeKey.self] = newValue }
     }
 }
 
@@ -84,10 +157,10 @@ struct ContentView: View {
     @StateObject private var audioPlayer = AudioPlayerModel()
 
     @AppStorage("appearance")
-    private var appearanceRawValue = AppAppearance.system.rawValue
+    private var themeRawValue = AppTheme.system.rawValue
 
-    private var appearance: AppAppearance {
-        AppAppearance(rawValue: appearanceRawValue) ?? .system
+    private var theme: AppTheme {
+        AppTheme(rawValue: themeRawValue) ?? .system
     }
 
     var body: some View {
@@ -115,7 +188,9 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 820, minHeight: 560)
-        .preferredColorScheme(appearance.colorScheme)
+        .preferredColorScheme(theme.colorScheme)
+        .tint(theme.accentColor)
+        .environment(\.podlyTheme, theme)
         .environmentObject(audioPlayer)
         .animation(.easeInOut(duration: 0.2), value: page)
         .animation(.easeInOut(duration: 0.2), value: audioPlayer.currentTrack != nil)
@@ -323,7 +398,11 @@ enum SpotDLService {
     }
 
     /// Runs `spotdl save` to get title / artist / cover without downloading.
-    static func fetchMetadata(executable: String, query: String) -> Metadata {
+    static func fetchMetadata(
+        executable: String,
+        query: String,
+        control: DownloadJobControl? = nil
+    ) -> Metadata {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("spotdl-\(UUID().uuidString).spotdl")
 
@@ -337,12 +416,19 @@ enum SpotDLService {
 
         do {
             try process.run()
+            control?.attach(process)
         } catch {
             return Metadata(tracks: [], fileURL: nil)
         }
 
         _ = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        control?.detach(process)
+
+        guard control?.isCancelled != true else {
+            try? FileManager.default.removeItem(at: file)
+            return Metadata(tracks: [], fileURL: nil)
+        }
 
         guard process.terminationStatus == 0,
               let data = try? Data(contentsOf: file),
@@ -423,13 +509,17 @@ enum BackupDownloadService {
     enum BackupError: LocalizedError {
         case missingTool(String)
         case incompleteMetadata
+        case alreadyDownloaded(URL)
         case commandFailed(String)
+        case cancelled
 
         var errorDescription: String? {
             switch self {
             case .missingTool(let name): return "Could not find \(name). Install it and try again."
             case .incompleteMetadata: return "Could not find complete track metadata and cover art. No file was saved."
+            case .alreadyDownloaded(let url): return "Already downloaded: \(url.lastPathComponent)"
             case .commandFailed(let output): return output.isEmpty ? "The backup download failed." : output
+                case .cancelled: return "Download cancelled."
             }
         }
     }
@@ -483,8 +573,14 @@ enum BackupDownloadService {
     static func download(
         metadata: TrackMetadata,
         destinationFolder: URL,
-        searchQuery: String
+        searchQuery: String,
+        control: DownloadJobControl? = nil
     ) throws -> (URL, String) {
+        if control?.isCancelled == true { throw BackupError.cancelled }
+        if let existingURL = existingTrack(matching: metadata, in: destinationFolder) {
+            throw BackupError.alreadyDownloaded(existingURL)
+        }
+
         guard let ytDlp = findExecutable(named: "yt-dlp") else {
             throw BackupError.missingTool("yt-dlp")
         }
@@ -516,7 +612,7 @@ enum BackupDownloadService {
             "ytsearch1:\(searchQuery)"
         ]
 
-        let searchOutput = try run(searchProcess)
+        let searchOutput = try run(searchProcess, control: control)
         guard let audioFile = try FileManager.default.contentsOfDirectory(
             at: temporaryFolder,
             includingPropertiesForKeys: nil
@@ -559,18 +655,62 @@ enum BackupDownloadService {
         tagArguments += ["-y", target.path]
         tagProcess.arguments = tagArguments
 
-        let tagOutput = try run(tagProcess)
-        return (target, searchOutput + tagOutput)
+        do {
+            let tagOutput = try run(tagProcess, control: control)
+            return (target, searchOutput + tagOutput)
+        } catch {
+            try? FileManager.default.removeItem(at: target)
+            throw error
+        }
     }
 
-    private static func run(_ process: Process) throws -> String {
+    private static func existingTrack(matching metadata: TrackMetadata, in folder: URL) -> URL? {
+        let result = TagService.run(["action": "scan", "folder": folder.path])
+        if let tracks = result["files"] as? [[String: Any]],
+           let match = tracks.first(where: {
+               normalized($0["title"] as? String ?? "") == normalized(metadata.title) &&
+               normalized($0["artist"] as? String ?? "") == normalized(metadata.artist)
+           }),
+           let path = match["path"] as? String {
+            return URL(fileURLWithPath: path)
+        }
+
+        let audioExtensions: Set<String> = ["mp3", "m4a", "flac", "ogg", "opus", "wav"]
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let titleArtist = normalized(metadata.title + metadata.artist)
+        let artistTitle = normalized(metadata.artist + metadata.title)
+
+        return files.first { url in
+            guard audioExtensions.contains(url.pathExtension.lowercased()) else { return false }
+            let stem = url.deletingPathExtension().lastPathComponent
+                .replacingOccurrences(of: #"\s+\(\d+\)$"#, with: "", options: .regularExpression)
+            let normalizedStem = normalized(stem)
+            return normalizedStem == titleArtist || normalizedStem == artistTitle
+        }
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined()
+    }
+
+    private static func run(_ process: Process, control: DownloadJobControl? = nil) throws -> String {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
+        control?.attach(process)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        control?.detach(process)
         let output = String(data: data, encoding: .utf8) ?? ""
+        if control?.isCancelled == true { throw BackupError.cancelled }
         guard process.terminationStatus == 0 else {
             throw BackupError.commandFailed(output)
         }
@@ -811,9 +951,122 @@ struct RecentFile: Identifiable, Equatable {
     var name: String { url.deletingPathExtension().lastPathComponent }
 }
 
+enum DownloadQueueStatus: String {
+    case queued
+    case downloading
+    case failed
+    case completed
+    case cancelled
+
+    var title: String {
+        switch self {
+        case .queued: return "Queued"
+        case .downloading: return "Downloading"
+        case .failed: return "Failed"
+        case .completed: return "Completed"
+        case .cancelled: return "Cancelled"
+        }
+    }
+}
+
+enum LibrarySortOrder: String, CaseIterable, Identifiable {
+    case title
+    case dateAdded
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .title: return "Title"
+        case .dateAdded: return "Date Added"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .title: return "textformat"
+        case .dateAdded: return "calendar"
+        }
+    }
+}
+
+struct DownloadQueueItem: Identifiable {
+    let id: UUID
+    let input: String
+    var status: DownloadQueueStatus
+
+    init(input: String, status: DownloadQueueStatus = .queued) {
+        id = UUID()
+        self.input = input
+        self.status = status
+    }
+}
+
+final class DownloadJobControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var paused = false
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func attach(_ process: Process) {
+        lock.lock()
+        self.process = process
+        if cancelled {
+            process.terminate()
+        } else if paused {
+            _ = process.suspend()
+        }
+        lock.unlock()
+    }
+
+    func detach(_ process: Process) {
+        lock.lock()
+        if self.process === process {
+            self.process = nil
+        }
+        lock.unlock()
+    }
+
+    func pause() {
+        lock.lock()
+        if !paused && !cancelled {
+            paused = true
+            if let process { _ = process.suspend() }
+        }
+        lock.unlock()
+    }
+
+    func resume() {
+        lock.lock()
+        if paused {
+            paused = false
+            if let process { _ = process.resume() }
+        }
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        if paused, let process {
+            _ = process.resume()
+            paused = false
+        }
+        process?.terminate()
+        lock.unlock()
+    }
+}
+
 // MARK: - Home
 
 struct HomeView: View {
+    @Environment(\.podlyTheme) private var theme
     @State private var query = ""
     @State private var log = "Ready"
     @State private var isDownloading = false
@@ -830,6 +1083,14 @@ struct HomeView: View {
     @State private var lookupFailed = false
     @State private var missedCount = 0
     @State private var activeDownloadSource: DownloadSource = .spotDL
+    @State private var homeResetTask: Task<Void, Never>?
+    @State private var downloadQueue: [DownloadQueueItem] = []
+    @State private var activeQueueID: UUID?
+    @State private var activeQueueInput = ""
+    @State private var queuePaused = false
+    @State private var downloadControl: DownloadJobControl?
+    @State private var showQueue = false
+    @State private var nextSourceOverride: DownloadSource?
 
     private let ticker = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
@@ -871,6 +1132,19 @@ struct HomeView: View {
                     Image(systemName: "terminal")
                 }
                 .help("View logs")
+
+                Button {
+                    showQueue.toggle()
+                } label: {
+                    Label(
+                        "\(downloadQueue.filter { $0.status == .queued || $0.status == .downloading }.count)",
+                        systemImage: "text.badge.plus"
+                    )
+                }
+                .help("Download queue")
+                .popover(isPresented: $showQueue, arrowEdge: .top) {
+                    downloadQueuePopover
+                }
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -924,7 +1198,7 @@ struct HomeView: View {
             .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(theme.canvas)
         .onAppear {
             createOutputFolderIfNeeded()
             loadRecent()
@@ -951,7 +1225,7 @@ struct HomeView: View {
                 .font(.system(size: 15))
                 .onSubmit { download() }
 
-            if !trimmedQuery.isEmpty && !isDownloading {
+            if !trimmedQuery.isEmpty {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { query = "" }
                 } label: {
@@ -965,12 +1239,12 @@ struct HomeView: View {
                 Button {
                     download()
                 } label: {
-                    Image(systemName: "arrow.down.circle.fill")
+                    Image(systemName: isDownloading ? "text.badge.plus" : "arrow.down.circle.fill")
                         .font(.system(size: 20))
                         .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
-                .help("Download")
+                .help(isDownloading ? "Add to download queue" : "Download")
                 .transition(.scale.combined(with: .opacity))
             }
         }
@@ -986,6 +1260,148 @@ struct HomeView: View {
         }
         .animation(.easeInOut(duration: 0.15), value: trimmedQuery.isEmpty)
         .animation(.easeInOut(duration: 0.15), value: isDownloading)
+    }
+
+    private var downloadQueuePopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Download Queue")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button {
+                    showQueue = false
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .help("Close queue")
+
+                if isDownloading || queuePaused {
+                    Button(queuePaused ? "Resume" : "Pause") {
+                        toggleQueuePause()
+                    }
+                    .controlSize(.small)
+                }
+
+                if isDownloading {
+                    Button("Cancel") {
+                        cancelActiveDownload()
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            if downloadQueue.isEmpty {
+                Text("Add songs using the search box.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(downloadQueue) { item in
+                            downloadQueueRow(item)
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            }
+        }
+        .padding(14)
+        .frame(width: 360)
+    }
+
+    private func downloadQueueRow(_ item: DownloadQueueItem) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: queueIcon(for: item.status))
+                .foregroundStyle(queueTint(for: item.status))
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.input)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(item.status == .downloading && queuePaused ? "Paused" : item.status.title)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 4)
+
+            if item.status == .failed || item.status == .cancelled {
+                Button {
+                    retryQueueItem(item)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .help("Retry")
+            } else if item.status == .queued {
+                HStack(spacing: 8) {
+                    Button {
+                        moveQueuedItem(item, by: -1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                    }
+                    .disabled(queuedPosition(of: item) == 0)
+                    .help("Move earlier")
+
+                    Button {
+                        moveQueuedItem(item, by: 1)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .disabled(queuedPosition(of: item) == queuedCount - 1)
+                    .help("Move later")
+
+                    Button {
+                        cancelQueuedItem(item)
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .help("Remove from queue")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(8)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func queueIcon(for status: DownloadQueueStatus) -> String {
+        switch status {
+        case .queued: return "clock"
+        case .downloading: return queuePaused ? "pause.circle" : "arrow.down.circle"
+        case .failed: return "exclamationmark.circle"
+        case .completed: return "checkmark.circle"
+        case .cancelled: return "xmark.circle"
+        }
+    }
+
+    private func queueTint(for status: DownloadQueueStatus) -> Color {
+        switch status {
+        case .queued: return .secondary
+        case .downloading: return .accentColor
+        case .failed, .cancelled: return .orange
+        case .completed: return .green
+        }
+    }
+
+    private var queuedCount: Int {
+        downloadQueue.filter { $0.status == .queued }.count
+    }
+
+    private func queuedPosition(of item: DownloadQueueItem) -> Int {
+        downloadQueue.filter { $0.status == .queued }.firstIndex(where: { $0.id == item.id }) ?? -1
+    }
+
+    private func moveQueuedItem(_ item: DownloadQueueItem, by offset: Int) {
+        let queued = downloadQueue.indices.filter { downloadQueue[$0].status == .queued }
+        guard let position = queued.firstIndex(where: { downloadQueue[$0].id == item.id }) else { return }
+        let targetPosition = position + offset
+        guard queued.indices.contains(targetPosition) else { return }
+        downloadQueue.swapAt(queued[position], queued[targetPosition])
     }
 
     private var nowPlayingSlot: some View {
@@ -1222,7 +1638,7 @@ struct HomeView: View {
                     }
                 case .failed, .notFound:
                     if !spotdlMissing {
-                        statusAction("Try again") { download() }
+                        statusAction("Try again") { retryLastFailed() }
                     }
                     if downloadStatus == .notFound {
                         statusAction("Try backup") { backupDownload() }
@@ -1336,8 +1752,31 @@ struct HomeView: View {
 
     private func download() {
         let input = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty, !isDownloading else { return }
-        activeDownloadSource = primaryDownloadSource
+        guard !input.isEmpty else { return }
+        downloadQueue.append(DownloadQueueItem(input: input))
+        query = ""
+        startNextQueuedDownload()
+    }
+
+    private func startNextQueuedDownload() {
+        guard !isDownloading, !queuePaused,
+              activeQueueID == nil,
+              let index = downloadQueue.firstIndex(where: { $0.status == .queued })
+        else { return }
+
+        let item = downloadQueue[index]
+        activeQueueID = item.id
+        activeQueueInput = item.input
+        downloadQueue[index].status = .downloading
+        downloadControl = DownloadJobControl()
+        startDownload(input: item.input)
+    }
+
+    private func startDownload(input: String) {
+        cancelHomeReset()
+        let sourceOverride = nextSourceOverride
+        activeDownloadSource = nextSourceOverride ?? primaryDownloadSource
+        nextSourceOverride = nil
 
         createOutputFolderIfNeeded()
 
@@ -1363,11 +1802,79 @@ struct HomeView: View {
             runBackupDownload(
                 input: input,
                 metadataQuery: input,
-                fallbackToSpotDL: true
+                fallbackToSpotDL: sourceOverride == nil
             )
         } else {
             startSpotDL(input: input, fallbackToYtDlp: true)
         }
+    }
+
+    private func toggleQueuePause() {
+        queuePaused.toggle()
+        if queuePaused {
+            downloadControl?.pause()
+        } else {
+            downloadControl?.resume()
+            startNextQueuedDownload()
+        }
+    }
+
+    private func cancelActiveDownload() {
+        guard isDownloading else { return }
+        downloadControl?.cancel()
+    }
+
+    private func cancelQueuedItem(_ item: DownloadQueueItem) {
+        guard let index = downloadQueue.firstIndex(where: { $0.id == item.id }),
+              downloadQueue[index].status == .queued
+        else { return }
+        downloadQueue[index].status = .cancelled
+    }
+
+    private func retryQueueItem(_ item: DownloadQueueItem) {
+        guard let index = downloadQueue.firstIndex(where: { $0.id == item.id }),
+              (downloadQueue[index].status == .failed ||
+                downloadQueue[index].status == .cancelled)
+        else { return }
+        downloadQueue[index].status = .queued
+        startNextQueuedDownload()
+    }
+
+    private func retryLastFailed() {
+        guard let item = downloadQueue.last(where: { $0.status == .failed }) else {
+            download()
+            return
+        }
+        retryQueueItem(item)
+    }
+
+    private func finishActiveQueueItem(_ status: DownloadQueueStatus) {
+        guard let queueID = activeQueueID,
+              let index = downloadQueue.firstIndex(where: { $0.id == queueID })
+        else { return }
+        downloadQueue[index].status = status
+        activeQueueID = nil
+        activeQueueInput = ""
+        downloadControl = nil
+        isDownloading = false
+        if status != .failed,
+           !downloadQueue.contains(where: { $0.status == .queued || $0.status == .downloading }),
+           !downloadQueue.contains(where: { $0.status == .failed }) {
+            showQueue = false
+        }
+        startNextQueuedDownload()
+    }
+
+    private func finishCancelledDownload() {
+        log += "\n\nDownload cancelled."
+        withAnimation(.easeInOut(duration: 0.2)) {
+            tracks = []
+            completedTracks = 0
+            withinTrack = 0
+            downloadStatus = .ready
+            isDownloading = false
+        }
+        finishActiveQueueItem(.cancelled)
     }
 
     private func startSpotDL(input: String, fallbackToYtDlp: Bool) {
@@ -1383,6 +1890,7 @@ struct HomeView: View {
             downloadStatus = .downloading
         }
         log += "\nStarting spotDL…\n"
+        let control = downloadControl
 
         DispatchQueue.global(qos: .userInitiated).async {
             guard let executable = SpotDLService.findExecutable() else {
@@ -1411,16 +1919,24 @@ struct HomeView: View {
                         isDownloading = false
                         downloadStatus = .failed
                     }
+                    finishActiveQueueItem(.failed)
+                    scheduleHomeReset()
                 }
                 return
             }
 
             let metadata = SpotDLService.fetchMetadata(
                 executable: executable,
-                query: input
+                query: input,
+                control: control
             )
 
             DispatchQueue.main.async {
+                guard control?.isCancelled != true else {
+                    finishCancelledDownload()
+                    return
+                }
+
                 if !metadata.tracks.isEmpty {
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                         tracks = metadata.tracks
@@ -1446,32 +1962,19 @@ struct HomeView: View {
     }
 
     private func backupDownload() {
-        let input = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty, !isDownloading else { return }
-
-        let metadataQuery: String
-        if let track = tracks.first, track.artist != "No song info found" {
-            metadataQuery = "\(track.artist) \(track.title)"
+        guard !isDownloading else { return }
+        if let index = downloadQueue.lastIndex(where: { $0.status == .failed }) {
+            downloadQueue[index].status = .queued
+            nextSourceOverride = .ytDlp
+            startNextQueuedDownload()
         } else {
-            metadataQuery = input
+            let input = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !input.isEmpty else { return }
+            downloadQueue.append(DownloadQueueItem(input: input))
+            query = ""
+            nextSourceOverride = .ytDlp
+            startNextQueuedDownload()
         }
-
-        downloadOutput = ""
-        completedTracks = 0
-        withinTrack = 0
-        metadataLoaded = false
-        lookupFailed = false
-        missedCount = 0
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-            tracks = [TrackInfo.placeholder(for: input)]
-            isDownloading = true
-            downloadStatus = .downloading
-        }
-        runBackupDownload(
-            input: input,
-            metadataQuery: metadataQuery,
-            fallbackToSpotDL: false
-        )
     }
 
     private func runBackupDownload(
@@ -1491,10 +1994,15 @@ struct HomeView: View {
             downloadStatus = .downloading
         }
         log += "\nStarting yt-dlp…\n"
+        let control = downloadControl
 
         Task {
             do {
                 let metadata = try await BackupDownloadService.lookupMetadata(query: metadataQuery)
+                guard control?.isCancelled != true else {
+                    finishCancelledDownload()
+                    return
+                }
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     tracks = [metadata.trackInfo]
                     metadataLoaded = true
@@ -1507,21 +2015,47 @@ struct HomeView: View {
                     try BackupDownloadService.download(
                         metadata: metadata,
                         destinationFolder: destinationFolder,
-                        searchQuery: searchQuery
+                        searchQuery: searchQuery,
+                        control: control
                     )
                 }.value
 
+                guard control?.isCancelled != true else {
+                    finishCancelledDownload()
+                    return
+                }
                 log += output
                 log += "\nBackup download saved to: \(savedURL.path)\n"
                 downloadCount += 1
-                query = ""
+                if query == activeQueueInput { query = "" }
                 withAnimation(.easeInOut(duration: 0.3)) {
                     completedTracks = tracks.count
                     withinTrack = 0
                     isDownloading = false
                     downloadStatus = .success
                 }
+                finishActiveQueueItem(.completed)
+                scheduleHomeReset()
             } catch {
+                if control?.isCancelled == true {
+                    finishCancelledDownload()
+                    return
+                }
+
+                    if let backupError = error as? BackupDownloadService.BackupError,
+                       case .alreadyDownloaded(let existingURL) = backupError {
+                        log += "\nAlready in Library: \(existingURL.path)\n"
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            completedTracks = tracks.count
+                            withinTrack = 0
+                            isDownloading = false
+                            downloadStatus = .duplicate
+                        }
+                        finishActiveQueueItem(.completed)
+                        scheduleHomeReset()
+                        return
+                    }
+
                 log += "\nBackup download failed: \(error.localizedDescription)\n"
                 if fallbackToSpotDL {
                     log += "Trying spotDL instead…\n"
@@ -1533,13 +2067,51 @@ struct HomeView: View {
                     isDownloading = false
                     downloadStatus = .failed
                 }
+                finishActiveQueueItem(.failed)
+                scheduleHomeReset()
             }
+        }
+    }
+
+    private func cancelHomeReset() {
+        homeResetTask?.cancel()
+        homeResetTask = nil
+    }
+
+    private func scheduleHomeReset() {
+        cancelHomeReset()
+        homeResetTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(5))
+            } catch {
+                return
+            }
+
+            guard !isDownloading,
+                  downloadStatus != .ready,
+                  downloadStatus != .notFound
+            else {
+                homeResetTask = nil
+                return
+            }
+
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                tracks = []
+                completedTracks = 0
+                withinTrack = 0
+                metadataLoaded = false
+                lookupFailed = false
+                missedCount = 0
+                downloadStatus = .ready
+            }
+            homeResetTask = nil
         }
     }
 
     private func runDownload(executable: String, saveFile: URL?, input: String) {
         let process = Process()
         let pipe = Pipe()
+        let control = downloadControl
 
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = saveFile.map { ["download", $0.path] } ?? [input]
@@ -1563,10 +2135,12 @@ struct HomeView: View {
 
         do {
             try process.run()
+            control?.attach(process)
 
             DispatchQueue.global(qos: .userInitiated).async {
                 process.waitUntilExit()
                 let status = process.terminationStatus
+                control?.detach(process)
 
                 pipe.fileHandleForReading.readabilityHandler = nil
                 let rest = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -1593,6 +2167,8 @@ struct HomeView: View {
                     isDownloading = false
                     downloadStatus = .failed
                 }
+                finishActiveQueueItem(.failed)
+                scheduleHomeReset()
             }
         }
     }
@@ -1600,6 +2176,11 @@ struct HomeView: View {
     private func finishDownload(status: Int32, saveFile: URL?) {
         if let saveFile {
             try? FileManager.default.removeItem(at: saveFile)
+        }
+
+        if downloadControl?.isCancelled == true {
+            finishCancelledDownload()
+            return
         }
 
         let output = log.lowercased()
@@ -1653,10 +2234,12 @@ struct HomeView: View {
             log += "\n\nspotDL exited with code \(status)."
         }
 
+        var startedFallback = false
         withAnimation(.easeInOut(duration: 0.3)) {
-                if activeDownloadSource == .spotDL,
-               detectedStatus == .notFound || detectedStatus == .failed {
-                let input = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if activeDownloadSource == .spotDL,
+               (detectedStatus == .notFound || detectedStatus == .failed) {
+                startedFallback = true
+                let input = activeQueueInput
                 let metadataQuery: String
                 if let track = tracks.first, track.artist != "No song info found" {
                     metadataQuery = "\(track.artist) \(track.title)"
@@ -1680,31 +2263,20 @@ struct HomeView: View {
                 withinTrack = 0
             }
 
-            if detectedStatus == .success {
+            if detectedStatus == .success, query == activeQueueInput {
                 query = ""
             }
         }
 
-        // หน่วงเวลา 15 วินาทีแล้วกลับไปที่หน้าแรก (Hero View / Initial Search View)
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(15))
-
-            // ตรวจสอบว่าไม่มีการดาวน์โหลดใหม่เริ่มต้นขึ้นระหว่างรอ 15 วินาที
-            guard !isDownloading,
-                downloadStatus != .ready,
-                downloadStatus != .notFound
-            else { return }
-
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                tracks = []
-                completedTracks = 0
-                withinTrack = 0
-                metadataLoaded = false
-                lookupFailed = false
-                missedCount = 0
-                downloadStatus = .ready
-                query = ""
-            }
+        if !startedFallback, detectedStatus != .notFound {
+            finishActiveQueueItem(
+                detectedStatus == .success || detectedStatus == .duplicate
+                    ? .completed
+                    : .failed
+            )
+            scheduleHomeReset()
+        } else if !startedFallback {
+            finishActiveQueueItem(.failed)
         }
     }
 }
@@ -2055,7 +2627,9 @@ def scan(folder, cover_dir=None):
         except Exception:
             d = blank(p, None)
         d["lyrics"] = ""
-        d["mtime"] = os.path.getmtime(p)
+        stat = os.stat(p)
+        d["added"] = getattr(stat, "st_birthtime", stat.st_mtime)
+        d["mtime"] = stat.st_mtime
         out.append(d)
     out.sort(key=lambda x: -x["mtime"])
     return out
@@ -2241,6 +2815,7 @@ struct MusicFile: Identifiable, Equatable {
     var duration: Int
     var bitrate: Int
     var fileSizeBytes: Int64
+    var addedDate: Date
     var editable: Bool
 
     var id: URL { url }
@@ -2288,6 +2863,7 @@ struct MusicFile: Identifiable, Equatable {
         duration = d["duration"] as? Int ?? 0
         bitrate = d["bitrate"] as? Int ?? 0
         fileSizeBytes = Self.fileSize(of: url)
+        addedDate = Self.addedDate(of: url, timestamp: d["added"] as? Double)
         editable = d["editable"] as? Bool ?? false
     }
 
@@ -2309,7 +2885,16 @@ struct MusicFile: Identifiable, Equatable {
         duration = 0
         bitrate = 0
         fileSizeBytes = Self.fileSize(of: url)
+        addedDate = Self.addedDate(of: url, timestamp: nil)
         editable = false
+    }
+
+    private static func addedDate(of url: URL, timestamp: Double?) -> Date {
+        if let timestamp, timestamp.isFinite {
+            return Date(timeIntervalSince1970: timestamp)
+        }
+        let values = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        return values?.creationDate ?? values?.contentModificationDate ?? .distantPast
     }
 
     private static func fileSize(of url: URL) -> Int64 {
@@ -3372,6 +3957,7 @@ struct LibraryRow: View {
 }
 
 struct LibraryView: View {
+    @Environment(\.podlyTheme) private var theme
     @StateObject private var model = LibraryModel()
     @EnvironmentObject private var player: AudioPlayerModel
 
@@ -3381,23 +3967,71 @@ struct LibraryView: View {
             .appendingPathComponent("Desktop/songs").path
 
     @State private var search = ""
+    @State private var showDuplicates = false
     @State private var editing: MusicFile?
     @State private var pendingTrash: MusicFile?
+    @AppStorage("librarySortOrder")
+    private var sortOrderRawValue = LibrarySortOrder.dateAdded.rawValue
 
     private var folder: URL {
         URL(fileURLWithPath: customOutputPath)
     }
 
+    private var sortOrder: LibrarySortOrder {
+        LibrarySortOrder(rawValue: sortOrderRawValue) ?? .dateAdded
+    }
+
+    private var duplicateTitleKeys: Set<String> {
+        Set(
+            Dictionary(grouping: model.files, by: Self.normalizedTitle)
+                .filter { !$0.key.isEmpty && $0.value.count > 1 }
+                .keys
+        )
+    }
+
     private var filtered: [MusicFile] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return model.files }
+        let duplicateTitles = duplicateTitleKeys
 
-        return model.files.filter {
-            [$0.title, $0.artist, $0.album, $0.fileName]
+        let matches = model.files.filter { file in
+            if showDuplicates && !duplicateTitles.contains(Self.normalizedTitle(file)) {
+                return false
+            }
+
+            guard !q.isEmpty else { return true }
+            return [file.title, file.artist, file.album, file.fileName]
                 .joined(separator: " ")
                 .lowercased()
                 .contains(q)
         }
+
+        switch sortOrder {
+        case .title:
+            return matches.sorted {
+                let result = $0.displayTitle.localizedStandardCompare($1.displayTitle)
+                if result == .orderedSame {
+                    return $0.artist.localizedStandardCompare($1.artist) == .orderedAscending
+                }
+                return result == .orderedAscending
+            }
+        case .dateAdded:
+            return matches.sorted {
+                if $0.addedDate == $1.addedDate {
+                    return $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending
+                }
+                return $0.addedDate > $1.addedDate
+            }
+        }
+    }
+
+    private static func normalizedTitle(_ file: MusicFile) -> String {
+        normalizedTitle(file.displayTitle)
+    }
+
+    private static func normalizedTitle(_ title: String) -> String {
+        title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined()
     }
 
     private var totalStorageUsed: String {
@@ -3417,7 +4051,7 @@ struct LibraryView: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(theme.canvas)
         .overlay(alignment: .bottom) { toastView }
         .onAppear { model.reload(folder: folder) }
         .onChange(of: customOutputPath) { _ in model.reload(folder: folder) }
@@ -3498,6 +4132,37 @@ struct LibraryView: View {
             .help("Add all Library songs to the Podly Sync playlist in Music; finish syncing in Finder")
             .disabled(model.isSyncingToMusic || model.files.isEmpty)
 
+            Button {
+                showDuplicates.toggle()
+            } label: {
+                Image(systemName: showDuplicates ? "doc.on.doc.fill" : "doc.on.doc")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(showDuplicates ? Color.accentColor : Color.secondary)
+            .accessibilityLabel(showDuplicates ? "Show all songs" : "Show duplicate titles")
+            .help(showDuplicates ? "Show all songs" : "Show songs with duplicate titles")
+            .disabled(model.files.isEmpty)
+
+            Menu {
+                ForEach(LibrarySortOrder.allCases) { option in
+                    Button {
+                        sortOrderRawValue = option.rawValue
+                    } label: {
+                        if sortOrder == option {
+                            Label(option.title, systemImage: "checkmark")
+                        } else {
+                            Text(option.title)
+                        }
+                    }
+                }
+            } label: {
+                Label("Sort", systemImage: sortOrder.icon)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Sort songs by \(sortOrder.title.lowercased())")
+            .disabled(model.files.isEmpty)
+
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
@@ -3569,7 +4234,13 @@ struct LibraryView: View {
         } else if model.files.isEmpty {
             emptyState
         } else if filtered.isEmpty {
-            Text("No songs match “\(search)”.")
+            Text(
+                showDuplicates
+                    ? (duplicateTitleKeys.isEmpty
+                        ? "No duplicate song titles found."
+                        : "No duplicate songs match “\(search)”.")
+                    : "No songs match “\(search)”."
+            )
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -4170,9 +4841,36 @@ struct TrackEditorView: View {
 
 // MARK: - Settings
 
+private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case appearance
+    case sources
+    case folder
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .appearance: return "Appearance"
+        case .sources: return "Download Sources"
+        case .folder: return "Download Folder"
+        case .about: return "About"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .appearance: return "paintpalette"
+        case .sources: return "arrow.down.circle"
+        case .folder: return "folder"
+        case .about: return "info.circle"
+        }
+    }
+}
+
 struct SettingsView: View {
     @AppStorage("appearance")
-    private var appearanceRawValue = AppAppearance.system.rawValue
+    private var themeRawValue = AppTheme.system.rawValue
 
     @AppStorage("primaryDownloadSource")
     private var primaryDownloadSourceRawValue = DownloadSource.spotDL.rawValue
@@ -4182,8 +4880,10 @@ struct SettingsView: View {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Desktop/songs").path
 
-    private var appearance: AppAppearance {
-        AppAppearance(rawValue: appearanceRawValue) ?? .system
+    @State private var selectedCategory: SettingsCategory = .appearance
+
+    private var theme: AppTheme {
+        AppTheme(rawValue: themeRawValue) ?? .system
     }
 
     private var primaryDownloadSource: DownloadSource {
@@ -4191,79 +4891,189 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                Picker("Appearance", selection: $appearanceRawValue) {
-                    ForEach(AppAppearance.allCases, id: \.rawValue) { item in
-                        Label(item.title, systemImage: item.icon)
-                            .tag(item.rawValue)
+        HStack(spacing: 0) {
+            categoryNavigation
+            Divider()
+            ScrollView {
+                selectedSettings
+                    .padding(22)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(theme.canvas)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("Settings")
+    }
+
+    private var categoryNavigation: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Settings")
+                .font(.system(size: 19, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
+
+            ForEach(SettingsCategory.allCases) { category in
+                Button {
+                    selectedCategory = category
+                } label: {
+                    Label(category.title, systemImage: category.icon)
+                        .font(.system(size: 12, weight: selectedCategory == category ? .medium : .regular))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background {
+                            if selectedCategory == category {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(Color.accentColor.opacity(0.12))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selectedCategory == category ? Color.accentColor : Color.primary)
+            }
+        }
+        .padding(14)
+        .frame(width: 170)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var selectedSettings: some View {
+        switch selectedCategory {
+        case .appearance:
+            appearanceSettings
+        case .sources:
+            sourceSettings
+        case .folder:
+            folderSettings
+        case .about:
+            aboutSettings
+        }
+    }
+
+    private var appearanceSettings: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            settingsHeading(
+                "Theme & Appearance",
+                subtitle: "Choose the colors Podly uses across the app."
+            )
+
+            LazyVGrid(
+                columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+                alignment: .leading,
+                spacing: 12
+            ) {
+                ForEach(AppTheme.allCases, id: \.rawValue) { option in
+                    ThemeOptionCard(
+                        theme: option,
+                        isSelected: theme == option
+                    ) {
+                        themeRawValue = option.rawValue
                     }
                 }
-                .pickerStyle(.menu)
-            } header: {
-                Text("Appearance")
-            } footer: {
-                Text("Choose how Podly should appear.")
             }
+        }
+    }
 
-            Section {
-                Picker("Try first", selection: $primaryDownloadSourceRawValue) {
-                    ForEach(DownloadSource.allCases, id: \.rawValue) { source in
-                        Label(source.title, systemImage: source.icon)
-                            .tag(source.rawValue)
+    private var sourceSettings: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            settingsHeading(
+                "Download Sources",
+                subtitle: "Choose which service Podly tries first."
+            )
+
+            settingsCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Try first", selection: $primaryDownloadSourceRawValue) {
+                        ForEach(DownloadSource.allCases, id: \.rawValue) { source in
+                            Label(source.title, systemImage: source.icon)
+                                .tag(source.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Divider()
+
+                    LabeledContent("Automatic fallback") {
+                        Label(
+                            primaryDownloadSource.alternate.title,
+                            systemImage: primaryDownloadSource.alternate.icon
+                        )
                     }
                 }
-                .pickerStyle(.menu)
-
-                LabeledContent("Fallback") {
-                    Label(
-                        primaryDownloadSource.alternate.title,
-                        systemImage: primaryDownloadSource.alternate.icon
-                    )
-                }
-            } header: {
-                Text("Download Sources")
-            } footer: {
-                Text("The other source is tried automatically if the first one fails or finds no match.")
             }
 
-            Section {
-                HStack {
-                    Image(systemName: "folder")
+            Text("The other source is tried automatically if the first one fails or finds no match.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var folderSettings: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            settingsHeading(
+                "Download Folder",
+                subtitle: "Choose where new songs are saved."
+            )
+
+            settingsCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Save downloads to", systemImage: "folder")
+                        .font(.system(size: 12, weight: .medium))
+
+                    Text(customOutputPath)
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                        .truncationMode(.head)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Download folder")
-                        Text(customOutputPath)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-
-                    Spacer()
-
-                    Button("Choose…") {
+                    Button("Choose Folder…") {
                         selectFolder()
                     }
                 }
-            } header: {
-                Text("Downloads")
-            }
-
-            Section {
-                LabeledContent("App", value: "Podly")
-                LabeledContent("Engine", value: "spotDL")
-                LabeledContent("Interface", value: "SwiftUI")
-                LabeledContent("Version", value: "1.0")
-            } header: {
-                Text("About")
             }
         }
-        .formStyle(.grouped)
-        .frame(maxWidth: 620)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Settings")
+    }
+
+    private var aboutSettings: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            settingsHeading("About Podly", subtitle: "Application information.")
+
+            settingsCard {
+                VStack(spacing: 10) {
+                    LabeledContent("App", value: "Podly")
+                    LabeledContent("Engine", value: "spotDL")
+                    LabeledContent("Interface", value: "SwiftUI")
+                    LabeledContent("Version", value: "1.0")
+                }
+            }
+        }
+    }
+
+    private func settingsHeading(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 18, weight: .semibold))
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.bottom, 2)
+    }
+
+    private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                theme.previewSurface.opacity(0.7),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            }
     }
 
     private func selectFolder() {
@@ -4280,6 +5090,79 @@ struct SettingsView: View {
                 at: url,
                 withIntermediateDirectories: true
             )
+        }
+    }
+
+    private struct ThemeOptionCard: View {
+        let theme: AppTheme
+        let isSelected: Bool
+        let action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                VStack(spacing: 7) {
+                    ZStack(alignment: .topTrailing) {
+                        HStack(spacing: 5) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(0..<4) { index in
+                                    HStack(spacing: 4) {
+                                        Circle()
+                                            .fill(theme.accentColor.opacity(index == 0 ? 1 : 0.35))
+                                            .frame(width: 4, height: 4)
+                                        Capsule()
+                                            .fill(theme.previewInk.opacity(index == 0 ? 0.3 : 0.16))
+                                            .frame(height: 3)
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(7)
+                            .background(theme.previewSurface, in: RoundedRectangle(cornerRadius: 6))
+
+                            VStack(spacing: 5) {
+                                Capsule()
+                                    .fill(theme.previewInk.opacity(0.22))
+                                    .frame(height: 4)
+                                Spacer(minLength: 0)
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(theme.accentColor)
+                                    .frame(width: 12, height: 7)
+                            }
+                            .padding(6)
+                            .frame(width: 28, height: 58)
+                            .background(theme.previewSurface.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .padding(7)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 82)
+                        .background(theme.canvas, in: RoundedRectangle(cornerRadius: 10))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(
+                                    isSelected ? theme.accentColor : Color.primary.opacity(0.08),
+                                    lineWidth: isSelected ? 2 : 1
+                                )
+                        }
+
+                        if isSelected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(theme.accentColor)
+                                .background(.background, in: Circle())
+                                .offset(x: 5, y: -5)
+                        }
+                    }
+
+                    Text(theme.title)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                        .lineLimit(1)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(theme.title) theme\(isSelected ? ", selected" : "")")
         }
     }
 }
