@@ -10,6 +10,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case appearance
     case language
     case sources
+    case tools
     case folder
     case about
 
@@ -20,6 +21,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance: return "Appearance"
         case .language: return "Language"
         case .sources: return "Download Sources"
+        case .tools: return "Tools"
         case .folder: return "Download Folder"
         case .about: return "About"
         }
@@ -30,10 +32,32 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance: return "paintpalette"
         case .language: return "globe"
         case .sources: return "arrow.down.circle"
+        case .tools: return "wrench.and.screwdriver"
         case .folder: return "folder"
         case .about: return "info.circle"
         }
     }
+}
+
+private enum ToolCheckState {
+    case checking
+    case available(String)
+    case missing
+    case failed(String)
+}
+
+private struct RequiredTool: Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    let installCommand: String
+
+    static let all = [
+        RequiredTool(id: "spotdl", title: "spotDL", icon: "music.note", installCommand: "python3 -m pip install spotdl"),
+        RequiredTool(id: "yt-dlp", title: "yt-dlp", icon: "play.rectangle", installCommand: "brew install yt-dlp"),
+        RequiredTool(id: "ffmpeg", title: "FFmpeg", icon: "waveform", installCommand: "brew install ffmpeg"),
+        RequiredTool(id: "mutagen", title: "mutagen", icon: "tag", installCommand: "python3 -m pip install mutagen")
+    ]
 }
 
 struct SettingsView: View {
@@ -51,6 +75,8 @@ struct SettingsView: View {
             .appendingPathComponent("Desktop/songs").path
 
     @State private var selectedCategory: SettingsCategory = .appearance
+    @State private var toolCheckStates: [String: ToolCheckState] = [:]
+    @State private var isCheckingTools = false
 
     private var theme: AppTheme {
         AppTheme(rawValue: themeRawValue) ?? .system
@@ -73,6 +99,11 @@ struct SettingsView: View {
         .background(theme.canvas)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Settings")
+        .onChange(of: selectedCategory) { category in
+            if category == .tools && toolCheckStates.isEmpty {
+                checkRequiredTools()
+            }
+        }
     }
 
     private var categoryNavigation: some View {
@@ -116,6 +147,8 @@ struct SettingsView: View {
             languageSettings
         case .sources:
             sourceSettings
+        case .tools:
+            toolsSettings
         case .folder:
             folderSettings
         case .about:
@@ -205,6 +238,180 @@ struct SettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var toolsSettings: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                settingsHeading(
+                    "Required Tools",
+                    subtitle: "Check whether the tools used by downloads and Library features are ready."
+                )
+
+                Spacer()
+
+                Button {
+                    checkRequiredTools()
+                } label: {
+                    Label("Recheck", systemImage: "arrow.clockwise")
+                }
+                .disabled(isCheckingTools)
+            }
+
+            settingsCard {
+                VStack(spacing: 0) {
+                    ForEach(RequiredTool.all) { tool in
+                        toolStatusRow(tool)
+                        if tool.id != RequiredTool.all.last?.id {
+                            Divider().padding(.leading, 32)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func toolStatusRow(_ tool: RequiredTool) -> some View {
+        let state = toolCheckStates[tool.id] ?? .checking
+
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: tool.icon)
+                .frame(width: 20)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(tool.title)
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    toolStatusLabel(state)
+                }
+
+                switch state {
+                case .available(let version):
+                    if !version.isEmpty {
+                        Text(version)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                case .missing:
+                    Text(tool.id == "mutagen" ? TagService.installCommand : tool.installCommand)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                case .failed(let message):
+                    Text(message)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                case .checking:
+                    EmptyView()
+                }
+            }
+        }
+        .padding(.vertical, 9)
+    }
+
+    @ViewBuilder
+    private func toolStatusLabel(_ state: ToolCheckState) -> some View {
+        switch state {
+        case .checking:
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.small)
+                Text("Checking…")
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+        case .available:
+            Label("Available", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.green)
+        case .missing:
+            Label("Not found", systemImage: "xmark.circle.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.orange)
+        case .failed:
+            Label("Check failed", systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func checkRequiredTools() {
+        guard !isCheckingTools else { return }
+        isCheckingTools = true
+        toolCheckStates = Dictionary(
+            uniqueKeysWithValues: RequiredTool.all.map { ($0.id, ToolCheckState.checking) }
+        )
+
+        DispatchQueue.global(qos: .utility).async {
+            var results: [String: ToolCheckState] = [:]
+            for tool in RequiredTool.all {
+                results[tool.id] = Self.check(tool)
+            }
+
+            DispatchQueue.main.async {
+                toolCheckStates = results
+                isCheckingTools = false
+            }
+        }
+    }
+
+    private static func check(_ tool: RequiredTool) -> ToolCheckState {
+        if tool.id == "mutagen" {
+            switch TagService.checkMutagen() {
+            case .available(let version): return .available("mutagen \(version)")
+            case .missing: return .missing
+            case .failed(let message): return .failed(message)
+            }
+        }
+
+        let executable: String?
+        let arguments: [String]
+        switch tool.id {
+        case "spotdl":
+            executable = SpotDLService.findExecutable()
+            arguments = ["--version"]
+        case "yt-dlp":
+            executable = BackupDownloadService.findExecutable(named: "yt-dlp")
+            arguments = ["--version"]
+        case "ffmpeg":
+            executable = BackupDownloadService.findExecutable(named: "ffmpeg")
+            arguments = ["-version"]
+        default:
+            return .failed("Unknown tool.")
+        }
+
+        guard let executable else { return .missing }
+
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = output
+
+        do {
+            try process.run()
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let result = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard process.terminationStatus == 0 else {
+            return .failed(result.isEmpty ? "Command exited with code \(process.terminationStatus)." : result)
+        }
+
+        return .available(result.components(separatedBy: .newlines).first ?? result)
     }
 
     private struct SettingsDropdown<OptionLabel: View>: View {

@@ -61,6 +61,12 @@
 "Appearance" = "外観";
 "Language" = "言語";
 "Download Sources" = "ダウンロードソース";
+"Tools" = "ツール";
+"Required Tools" = "必要なツール";
+"Check whether the tools used by downloads and Library features are ready." = "ダウンロードとライブラリ機能に必要なツールを確認します。";
+"Checking…" = "確認中…";
+"Available" = "利用可能";
+"Check failed" = "確認に失敗しました";
 "Download Folder" = "ダウンロードフォルダ";
 "About" = "Podlyについて";
 "Theme & Appearance" = "テーマと外観";

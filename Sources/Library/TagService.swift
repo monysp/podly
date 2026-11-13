@@ -9,10 +9,50 @@ import UniformTypeIdentifiers
 /// Reads and writes tags, lyrics and cover art with Python's `mutagen`,
 /// which is already installed as a dependency of spotDL.
 enum TagService {
+    enum MutagenCheckResult {
+        case available(String)
+        case missing
+        case failed(String)
+    }
+
     private static let python: String? = resolvePython()
 
     static var installCommand: String {
         "\(python ?? "python3") -m pip install mutagen"
+    }
+
+    static func checkMutagen() -> MutagenCheckResult {
+        guard let python else { return .missing }
+
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: python)
+        process.arguments = [
+            "-c",
+            "import importlib.util, sys; sys.exit(2) if importlib.util.find_spec('mutagen') is None else None; import mutagen; print(getattr(mutagen, '__version__', 'Installed'))"
+        ]
+        process.standardOutput = output
+        process.standardError = output
+
+        do {
+            try process.run()
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let result = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        switch process.terminationStatus {
+        case 0:
+            return .available(result)
+        case 2:
+            return .missing
+        default:
+            return .failed(result.isEmpty ? "Python exited with code \(process.terminationStatus)." : result)
+        }
     }
 
     /// Uses the same interpreter that spotDL runs on (read from its shebang line).
@@ -423,4 +463,3 @@ def main():
 main()
 """#
 }
-

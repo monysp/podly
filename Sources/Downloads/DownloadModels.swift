@@ -12,7 +12,7 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selection) {
             Section {
-                Label("Home", systemImage: "arrow.down.circle")
+                Label("Home", systemImage: "house")
                     .tag(AppPage.home)
 
                 Label("Library", systemImage: "books.vertical")

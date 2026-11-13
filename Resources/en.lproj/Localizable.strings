@@ -61,6 +61,12 @@
 "Appearance" = "Appearance";
 "Language" = "Language";
 "Download Sources" = "Download Sources";
+"Tools" = "Tools";
+"Required Tools" = "Required Tools";
+"Check whether the tools used by downloads and Library features are ready." = "Check whether the tools used by downloads and Library features are ready.";
+"Checking…" = "Checking…";
+"Available" = "Available";
+"Check failed" = "Check failed";
 "Download Folder" = "Download Folder";
 "About" = "About";
 "Theme & Appearance" = "Theme & Appearance";

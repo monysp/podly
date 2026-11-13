@@ -61,6 +61,12 @@
 "Appearance" = "รูปลักษณ์";
 "Language" = "ภาษา";
 "Download Sources" = "แหล่งดาวน์โหลด";
+"Tools" = "เครื่องมือ";
+"Required Tools" = "เครื่องมือที่จำเป็น";
+"Check whether the tools used by downloads and Library features are ready." = "ตรวจสอบเครื่องมือที่ใช้ดาวน์โหลดและจัดการคลังเพลง";
+"Checking…" = "กำลังตรวจสอบ…";
+"Available" = "พร้อมใช้งาน";
+"Check failed" = "ตรวจสอบไม่สำเร็จ";
 "Download Folder" = "โฟลเดอร์ดาวน์โหลด";
 "About" = "เกี่ยวกับ";
 "Theme & Appearance" = "ธีมและรูปลักษณ์";

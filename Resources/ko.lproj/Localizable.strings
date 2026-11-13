@@ -61,6 +61,12 @@
 "Appearance" = "모양";
 "Language" = "언어";
 "Download Sources" = "다운로드 소스";
+"Tools" = "도구";
+"Required Tools" = "필수 도구";
+"Check whether the tools used by downloads and Library features are ready." = "다운로드 및 보관함 기능에 필요한 도구를 확인합니다.";
+"Checking…" = "확인 중…";
+"Available" = "사용 가능";
+"Check failed" = "확인 실패";
 "Download Folder" = "다운로드 폴더";
 "About" = "정보";
 "Theme & Appearance" = "테마 및 모양";
