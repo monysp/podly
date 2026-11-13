@@ -223,6 +223,8 @@ enum BackupDownloadService {
             "--no-playlist",
             "--extract-audio",
             "--audio-format", "mp3",
+            "--ffmpeg-location",
+            URL(fileURLWithPath: ffmpeg).deletingLastPathComponent().path,
             "--output", audioTemplate,
             "ytsearch1:\(searchQuery)"
         ]
@@ -332,7 +334,7 @@ enum BackupDownloadService {
         return output
     }
 
-    private static func findExecutable(named name: String) -> String? {
+    static func findExecutable(named name: String) -> String? {
         let candidates = [
             "/opt/homebrew/bin/\(name)",
             "/usr/local/bin/\(name)",
@@ -365,4 +367,3 @@ enum BackupDownloadService {
         return url
     }
 }
-

@@ -1059,6 +1059,20 @@ struct HomeView: View {
         process.currentDirectoryURL = outputFolder
         process.standardOutput = pipe
         process.standardError = pipe
+        if let ffmpeg = BackupDownloadService.findExecutable(named: "ffmpeg") {
+            var environment = ProcessInfo.processInfo.environment
+            let ffmpegDirectory = URL(fileURLWithPath: ffmpeg)
+                .deletingLastPathComponent()
+                .path
+            var pathEntries = (environment["PATH"] ?? "")
+                .split(separator: ":")
+                .map(String.init)
+            if !pathEntries.contains(ffmpegDirectory) {
+                pathEntries.insert(ffmpegDirectory, at: 0)
+            }
+            environment["PATH"] = pathEntries.joined(separator: ":")
+            process.environment = environment
+        }
 
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData

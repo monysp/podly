@@ -131,12 +131,14 @@ struct SettingsView: View {
             )
 
             settingsCard {
-                Picker("App language", selection: $languageRawValue) {
-                    ForEach(AppLanguage.allCases) { language in
-                        Text(language.nativeName).tag(language.rawValue)
-                    }
+                SettingsDropdown(
+                    title: "App language",
+                    selectedTitle: AppLanguage(rawValue: languageRawValue)?.nativeName ?? AppLanguage.english.nativeName,
+                    options: AppLanguage.allCases.map(\.rawValue),
+                    selection: $languageRawValue
+                ) { rawValue in
+                    Text(AppLanguage(rawValue: rawValue)?.nativeName ?? rawValue)
                 }
-                .pickerStyle(.menu)
             }
         }
     }
@@ -174,13 +176,18 @@ struct SettingsView: View {
 
             settingsCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("Try first", selection: $primaryDownloadSourceRawValue) {
-                        ForEach(DownloadSource.allCases, id: \.rawValue) { source in
+                    SettingsDropdown(
+                        title: "Try first",
+                        selectedTitle: primaryDownloadSource.title,
+                        options: DownloadSource.allCases.map(\.rawValue),
+                        selection: $primaryDownloadSourceRawValue
+                    ) { rawValue in
+                        if let source = DownloadSource(rawValue: rawValue) {
                             Label(source.title, systemImage: source.icon)
-                                .tag(source.rawValue)
+                        } else {
+                            Text(rawValue)
                         }
                     }
-                    .pickerStyle(.menu)
 
                     Divider()
 
@@ -191,11 +198,66 @@ struct SettingsView: View {
                         )
                     }
                 }
+
             }
 
             Text("The other source is tried automatically if the first one fails or finds no match.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private struct SettingsDropdown<OptionLabel: View>: View {
+        let title: LocalizedStringKey
+        let selectedTitle: String
+        let options: [String]
+        @Binding var selection: String
+        @ViewBuilder let optionLabel: (String) -> OptionLabel
+
+        var body: some View {
+            Menu {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        selection = option
+                    } label: {
+                        HStack {
+                            optionLabel(option)
+                            Spacer()
+                            if selection == option {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+
+                    Spacer(minLength: 12)
+
+                    Text(selectedTitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    Color.primary.opacity(0.035),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            .menuStyle(.borderlessButton)
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(title))
+            .accessibilityValue(Text(selectedTitle))
         }
     }
 

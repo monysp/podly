@@ -44,7 +44,7 @@ yt-dlp --version
 ffmpeg -version
 ```
 
-Podly checks common install locations and the login-shell `PATH` when looking for `spotdl`, `yt-dlp`, and `ffmpeg`.
+Podly checks common install locations and the login-shell `PATH` when looking for `spotdl`, `yt-dlp`, and `ffmpeg`. It makes the discovered FFmpeg directory available to `spotDL` and passes it directly to `yt-dlp`, including when the app is launched from Finder.
 
 ## Build and Run
 
@@ -89,7 +89,7 @@ macOS may ask Podly for permission to control Music the first time.
 
 **No matching song is found** – Check the spelling, try `Artist - Title`, or paste the Spotify track link. Search results can vary by track and region.
 
-**A download fails or has no audio** – Confirm FFmpeg is installed and open the download log from Home. The log includes output from the source tools.
+**A download reports that `ffprobe` or `ffmpeg` was not found** – Install FFmpeg with `brew install ffmpeg`. Podly passes its discovered FFmpeg location to the download tools; open the download log from Home for any remaining errors.
 
 **Library tag editing is unavailable** – Install `mutagen` for the Python interpreter used by Podly, then refresh the Library.
 
